@@ -2,7 +2,7 @@ import streamlit as st
 import py3Dmol
 import streamlit.components.v1 as components
 
-# ページ設定（モバイルファーストのため、初期はcenteredが扱いやすいです）
+# ページ設定
 st.set_page_config(
     page_title="3D AI創薬シミュレータ",
     page_icon="🧬",
@@ -13,104 +13,117 @@ st.title("🧬 3D AI創薬シミュレータ")
 st.write("白血病の原因タンパク質「BCR-ABL」と、薬「イマチニブ」の3Dモデルです。スマホ画面でも指で回したり拡大できます。")
 
 st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
-st.caption("📱 画面内をスワイプ（ドラッグ）すると、好きな角度からポケットを覗き込めます")
+st.caption("📱 画面内をスワイプ（ドラッグ）して好きな角度からポケットを覗き込めます")
 
-# --- py3Dmolによる3Dモデル構築（完全指定＆モバイルサイズ版） ---
-view = py3Dmol.view(query='pdb:1IEP', width=350, height=350) # スマホの横幅に合わせて350pxに最適化
+# --- py3Dmolによる3Dモデル構築（滑らかなSurface再現版） ---
+view = py3Dmol.view(query='pdb:1IEP', width=350, height=350)
 view.setStyle({}, {})
 
-# 【バグ対策】曖昧な'protein'セレクタを廃止し、「チェーンA」の主要原子を直接指定して確実に表示させる
-view.setStyle({'chain': 'A', 'elem': ['C', 'N', 'O', 'S']}, {
-    'sphere': {'colorscheme': 'pqp', 'radius': 1.6, 'opacity': 0.9}
-})
+# 【添付画像の見え方を再現】
+# タンパク質（Aチェーン）に滑らかなSurfaceを適用。内側の空洞（ポケット）が綺麗に見えるようにします
+view.addSurface(py3Dmol.SURFACE, {
+    'opacity': 0.9,
+    'colorscheme': 'pqp',  # 極性＝ピンク〜紫、疎水性＝白
+    'state': {'chain': 'A'}
+}, {'chain': 'A', 'protein': True})
 
-# 薬（STI）のうち、チェーンAに結合しているものだけを表示（上から太めのスティックで重ねる）
+# 薬（STI）を太めの球棒（スティック）モデルでくっきり重ねて表示
 view.setStyle({'chain': 'A', 'resn': 'STI'}, {
-    'stick': {'colorscheme': 'greenCarbon', 'radius': 0.35}
+    'stick': {'colorscheme': 'greenCarbon', 'radius': 0.3},
+    'sphere': {'scale': 0.3}
 })
 
-# 不要な他のチェーンや水分子を完全に除外
+# 不要なBチェーンや水分子を非表示
 view.setStyle({'chain': 'B'}, {})
 view.setStyle({'resn': 'HOH'}, {})
 
-# スローニン315 (Thr315) の演出（スライダー変数 size は下で定義しますが、Streamlitの仕様上問題ありません）
-# セッション状態からサイズを取得するか、安全のために初期値ベースで判定（あるいは下のスライダーを先読み）
-# ここでは直感的に動くよう、下で定義するスライダー変数を先に持ってきます
 st.divider()
 
 st.subheader("🛠️ 創薬パラメーターの調整")
-st.markdown("高校化学の知識を使い、スライダーを動かして「薬とポケットの相性」を変化させてみましょう。")
+st.markdown("高校化学の知識を使い、官能基の種類と数を変えて「薬とポケットの相性」を変化させてみましょう。")
 
-# スマホで見やすいよう、選択肢やスライダーを縦に並べます
-charge = st.radio(
-    "【1】官能基の電気的性質（電荷）",
-    options=["プラス（アミノ基を配置）", "中性（メチル基を配置）", "マイナス（カルボキシ基を配置）"],
-    index=1
-)
+# 【機能追加】官能基の電気的性質をタブで切り替え
+tab1, tab2, tab3 = st.tabs(["🔴 プラス（アミノ基）", "⚪ 中性（メチル基）", "🔵 マイナス（カルボキシ基）"])
 
-philic = st.slider(
-    "【2】ベンゼン環の数（油へなじみやすさ）",
-    min_value=1, max_value=3, value=2
-)
+with tab1:
+    st.markdown("**アミノ基（$-NH_2$）**：溶液中でH+を受け取り、**プラス**に帯電しやすい官能基です。")
+    amino_count = st.slider("配置するアミノ基の数", min_value=1, max_value=5, value=1, key="amino")
+    selected_charge = "プラス"
+    functional_group_count = amino_count
 
-size = st.slider(
-    "【3】分子の長さ（リンカー長）",
-    min_value=1, max_value=5, value=3
-)
+with tab2:
+    st.markdown("**メチル基（$-CH_3$）**：電気的な偏りがほとんどない、**中性・疎水性（油っぽい）**の官能基です。")
+    methyl_count = st.slider("配置するメチル基の数", min_value=1, max_value=5, value=1, key="methyl")
+    selected_charge = "中性"
+    functional_group_count = methyl_count
 
-# スライダーの値に応じて3Dの Thr315 の色とラベルを変更
+with tab3:
+    st.markdown("**カルボキシ基（$-COOH$）**：溶液中でH+を放出し、**マイナス**に帯電しやすい官能基です。")
+    carboxy_count = st.slider("配置するカルボキシ基の数", min_value=1, max_value=5, value=1, key="carboxy")
+    selected_charge = "マイナス"
+    functional_group_count = carboxy_count
+
+# 【既存のスライダー】疎水性とサイズ
+philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）", min_value=1, max_value=3, value=2)
+size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
+
+# 3DのThr315の演出とラベル（衝突判定）
 if size > 3:
-    view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'yellowCarbon', 'radius': 1.8}})
+    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
     view.addLabel("💥衝突注意: Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
 else:
-    view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'magentaCarbon', 'radius': 1.7}})
+    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'magentaCarbon', 'radius': 0.3}})
     view.addLabel("Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
 
 view.addLabel("開発中の薬", {'chain': 'A', 'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
 view.zoomTo({'chain': 'A', 'resn': 'STI'})
 
-# --- 3Dモデルを上部に表示するためのHTML埋め込み（スマホ対応） ---
+# HTML埋め込み表示（スマホサイズ）
 html_source = view._make_html()
-# スライダーの下ではなく、タイトル直下に表示されるよう、上にコンポーネントを配置したいですが、
-# Streamlitはコードの順序通りに描画するため、見やすさを考慮してここでレンダリングします。
-# 順番を「3Dモデル -> スライダー -> 解説」のスマホ最適化配置にします。
 st.components.v1.html(html_source, height=360, width=360)
 
-st.info("💡 **データの見方:** 周りの「もこもこした球体の壁」がタンパク質のポケットです。ピンク〜紫の部分が『極性（電気的な性質がある場所）』、白色の部分が『疎水性（油っぽい場所）』です。")
+st.info("💡 **データの見方**：もこもこした壁がタンパク質のポケットです。ピンク〜紫の部分が『極性（電気的な性質がある場所）』、白色の部分が『疎水性（油っぽい場所）』です。")
 
 st.divider()
 
-# リアルタイムの化学変化解説
+# --- リアルタイムの化学変化解説 ＆ スコア計算 ---
 st.markdown("### 🔍 現在の結合シミュレーション解説")
 
 score = 0
 
-if "プラス" in charge:
-    score += 40
-    st.success("⭕ **電荷:** ポケット奥のマイナスアミノ酸と、薬のプラス（アミノ基）が磁石のように強烈に引き合っています！（静電相互作用）")
-elif "マイナス" in charge:
+# 電荷と数の判定（実際のイマチニブはプラスのアミノ基が1つ綺麗に噛み合うのがベスト）
+if selected_charge == "プラス":
+    if functional_group_count == 1:
+        score += 40
+        st.success(f"⭕ **電荷:** 素晴らしい！アミノ基が1つ配置され、ポケット奥のマイナスアミノ酸と磁石のように完璧に引き合いました！（静電相互作用）")
+    else:
+        score += 25
+        st.warning(f"🔺 **電荷:** プラスのアミノ基が{functional_group_count}個は多すぎます。引き合いは生じますが、分子が大きくなりすぎてポケットの形を歪めてしまいます。")
+elif selected_charge == "マイナス":
     score += 0
-    st.error("❌ **電荷:** マイナス同士が反発！磁石の同極のように薬が弾き飛ばされてしまいます。")
+    st.error(f"❌ **電荷:** マイナスのカルボキシ基が{functional_group_count}個配置されました。ポケット奥のマイナス電荷と強烈に反発し、薬が弾き飛ばされます！")
 else:
     score += 15
-    st.warning("🔺 **電荷:** 反発はしませんが、強い引き合いも生まれず、結合が弱いです。")
+    st.warning(f"🔺 **電荷:** 中性のメチル基が{functional_group_count}個配置されました。電気的な反発は起きませんが、引き合う力も生まれません。")
     
+# 疎水性の判定
 if philic == 3:
     score += 30
-    st.success("⭕ **疎水性:** ベンゼン環の油っぽさがポケットの疎水性領域と完璧に密着し、安定しました。")
+    st.success("⭕ **疎水性:** ベンゼン環が3つになり、ポケットの油っぽい領域と完璧に密着しました。")
 elif philic == 2:
     score += 25
     st.info("🔺 **疎水性:** イマチニブの標準骨格です。十分良好な結合です。")
 else:
     score += 10
-    st.error("❌ **疎水性:** 油っぽさが足りず、周りの水分子に邪魔されてポケットから滑り落ちてしまいます。")
+    st.error("❌ **疎水性:** ベンゼン環が1つでは油っぽさが足りず、周りの水分子に邪魔されて滑り落ちてしまいます。")
 
+# サイズの判定
 if size == 3:
     score += 30
-    st.success("⭕ **サイズ:** 完璧な長さです！入り口にある「スレオニン315（Thr315）」の壁をすり抜けて奥まで届いています。")
+    st.success("⭕ **サイズ:** 完璧な長さです！「Thr315」の壁をすり抜けて奥まで届いています。")
 elif size > 3:
     score -= 15
-    st.error("💥 **立体障害発生:** 分子が長すぎます！3Dモデルで黄色く光っている『Thr315』の壁に激突しています！")
+    st.error("💥 **立体障害発生:** 分子が長すぎます！3Dモデルの『Thr315』の壁に激突しています！")
 else:
     score += 10
     st.warning("🔺 **サイズ:** 短すぎます！奥のポケットまで手が届いていません。")
