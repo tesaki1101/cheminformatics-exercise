@@ -27,9 +27,10 @@ with col1:
     )
     
     # 2. 疎水性（ベンゼン環などの油っぽさ）
+    # ★こちらのエラー箇所を修正しました
     philic = st.slider(
         "【2】ベンゼン環の数（油へなじみやすさ）",
-        min_value=1, min_value=1, max_value=3, value=2,
+        min_value=1, max_value=3, value=2,
         help="数を増やすほど疎水性が上がり、タンパク質の油っぽい隙間（ポケット）に馴染みます。"
     )
     
@@ -82,7 +83,6 @@ with col2:
     st.caption("💻 マウス左ドラッグ：回転 / 右ドラッグ：移動 / ホイール：拡大縮小")
     
     # --- py3Dmolによる3Dモデル構築 ---
-    # PDBから実際のBCR-ABLとイマチニブの複合体構造(1IEP)を読み込む
     view = py3Dmol.view(query='pdb:1IEP', width=600, height=500)
     
     # タンパク質全体を薄い灰色のリボン（漫画スタイル）で表示
@@ -92,7 +92,6 @@ with col2:
     view.setStyle({'hetero': True}, {'stick': {'colorscheme': 'cyanCarbon', 'radius': 0.3}})
     
     # 超重要アミノ酸「スレオニン315 (Thr315)」をハイライト表示
-    # スライダーでサイズが「長すぎ(>3)」になったら、警告としてThr315を黄色く光らせる演出
     if size > 3:
         view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
         view.addLabel("💥衝突注意: Thr315の壁", {'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.8})
@@ -103,7 +102,7 @@ with col2:
     # 薬（STI: イマチニブのPDBコード）にもラベルをつける
     view.addLabel("薬（イマチニブ類似体）", {'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
     
-    # 視点を結合ポケット周辺にクローズアップ（ここがポイント！）
+    # 視点を結合ポケット周辺にクローズアップ
     view.zoomTo({'resn': 'STI'})
     
     # Streamlit画面に3Dモデルを表示
