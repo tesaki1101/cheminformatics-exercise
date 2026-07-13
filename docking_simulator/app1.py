@@ -69,7 +69,7 @@ with col1:
 
     if size == 3:
         score += 30
-        st.success("⭕ **サイズ:** 完璧な長さです！入り口にあるゲートキーパー「スレオニン315（Thr315）」の壁をすり抜けて奥まで届いています。")
+        st.success("⭕ **サイズ:** 完璧な長さです！入り口にある「スレオニン315（Thr315）」の壁をすり抜けて奥まで届いています。")
     elif size > 3:
         score -= 15
         st.error("💥 **立体障害発生:** 分子が長すぎます！3Dモデルで黄色く光っている『Thr315』の壁に激突し、ポケットに入りません！")
@@ -84,40 +84,38 @@ with col2:
     st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
     st.caption("💻 画面内をドラッグすると、好きな角度からポケットの奥を覗き込めます")
     
-    # --- py3Dmolによる3Dモデル構築（エラー回避・スタイル上書き版） ---
+    # --- py3Dmolによる3Dモデル構築（安定型モデル） ---
     view = py3Dmol.view(query='pdb:1IEP', width=600, height=500)
     
-    # 【修正点】初期設定のワイヤーフレーム等の表示スタイルを、全分子に対して一回「空」にして非表示化します
+    # 初期スタイルを完全にリセット
     view.setStyle({}, {})
     
-    # チェーンAのタンパク質だけに「極性カラー（pqp）」のSurface（分子表面）を設定
-    # これによりチェーンBや水分子のSurfaceは作られず、ワイヤーフレームも消えます
-    view.addSurface(py3Dmol.VDW, {
-        'opacity': 0.85, 
-        'colorscheme': 'pqp'
-    }, {'chain': 'A', 'protein': True})
-    
-    # 薬（残基名 STI）を、サーフェスのポケットの上に重ねてくっきり球棒モデルで表示
-    view.setStyle({'resn': 'STI'}, {
-        'stick': {'colorscheme': 'greenCarbon', 'radius': 0.25},
-        'sphere': {'scale': 0.35}
+    # 【対策1】タンパク質は「チェーンAのみ」を抽出し、立体感の出るSphere（空間充填モデル）で表示！
+    # カラーマップには親水性・疎水性が綺麗に出る'pqp'を採用（もこもこした壁が再現されます）
+    view.setStyle({'chain': 'A', 'protein': True}, {
+        'sphere': {'colorscheme': 'pqp', 'radius': 1.6, 'opacity': 0.9}
     })
     
-    # ゲートキーパー「スレオニン315 (Thr315)」のハイライト演出
-    if size > 3:
-        view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
-        view.addLabel("💥衝突: Thr315の壁", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
-    else:
-        view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'magentaCarbon', 'radius': 0.3}})
-        view.addLabel("ゲートキーパー: Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
-        
-    view.addLabel("開発中の薬", {'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
+    # 【対策2】薬（STI）も「チェーンAに結合しているもの1つだけ」を指定して、上から太めのスティックで重ねる
+    view.setStyle({'chain': 'A', 'resn': 'STI'}, {
+        'stick': {'colorscheme': 'greenCarbon', 'radius': 0.35}
+    })
     
-    # 薬（イマチニブ）の位置へカメラをズーム
-    view.zoomTo({'resn': 'STI'})
+    # スレオニン315 (Thr315) のハイライト演出（不要な単語ラベルは除外しました）
+    if size > 3:
+        view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'yellowCarbon', 'radius': 1.8}})
+        view.addLabel("💥衝突注意: Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
+    else:
+        view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'magentaCarbon', 'radius': 1.7}})
+        view.addLabel("Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
+        
+    view.addLabel("開発中の薬", {'chain': 'A', 'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
+    
+    # チェーンAの薬の位置へカメラをズーム
+    view.zoomTo({'chain': 'A', 'resn': 'STI'})
     
     # HTMLに出力
     html_source = view._make_html()
     components.html(html_source, height=500, width=600)
     
-    st.info("💡 **データの見方:** 周りの「もこもこした壁」がタンパク質（チェーンA）のポケットです。ピンク〜紫の部分が『極性（電気的な性質がある場所）』、白色の部分が『疎水性（油っぽい場所）』です。薬が隙間にぴったり挟まっている様子を観察してください！")
+    st.info("💡 **データの見方:** 周りの「もこもこした球体の壁」がタンパク質（チェーンA）のポケットです。ピンク〜紫の部分が『極性（電気的な性質がある場所）』、白色の部分が『疎水性（油っぽい場所）』です。薬が隙間にぴったり挟まっている様子を観察してください！")
