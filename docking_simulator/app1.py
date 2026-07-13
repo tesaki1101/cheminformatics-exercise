@@ -1,6 +1,6 @@
 import streamlit as st
-from stmol import showmol
 import py3Dmol
+import streamlit.components.v1 as components
 
 # ページ設定
 st.set_page_config(
@@ -27,7 +27,6 @@ with col1:
     )
     
     # 2. 疎水性（ベンゼン環などの油っぽさ）
-    # ★こちらのエラー箇所を修正しました
     philic = st.slider(
         "【2】ベンゼン環の数（油へなじみやすさ）",
         min_value=1, max_value=3, value=2,
@@ -46,7 +45,6 @@ with col1:
     # リアルタイムの化学変化解説
     st.markdown("### 🔍 現在の結合シミュレーション解説")
     
-    # スコア計算と解説の動的切り替え
     score = 0
     
     if "プラス" in charge:
@@ -82,16 +80,16 @@ with col2:
     st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
     st.caption("💻 マウス左ドラッグ：回転 / 右ドラッグ：移動 / ホイール：拡大縮小")
     
-    # --- py3Dmolによる3Dモデル構築 ---
+    # --- py3Dmolによる3Dモデル構築（HTML直接埋め込み型） ---
     view = py3Dmol.view(query='pdb:1IEP', width=600, height=500)
     
-    # タンパク質全体を薄い灰色のリボン（漫画スタイル）で表示
+    # タンパク質全体を薄い灰色のリボンで表示
     view.setStyle({'protein': True}, {'cartoon': {'color': '#e0e0e0', 'opacity': 0.8}})
     
-    # 薬（イマチニブ）をスティックモデルで目立たせて表示（元素ごとに色分け）
+    # 薬（イマチニブ）をスティックモデルで表示
     view.setStyle({'hetero': True}, {'stick': {'colorscheme': 'cyanCarbon', 'radius': 0.3}})
     
-    # 超重要アミノ酸「スレオニン315 (Thr315)」をハイライト表示
+    # 超重要アミノ酸「スレオニン315 (Thr315)」のハイライト演出
     if size > 3:
         view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
         view.addLabel("💥衝突注意: Thr315の壁", {'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.8})
@@ -99,13 +97,11 @@ with col2:
         view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'greenCarbon', 'radius': 0.3}})
         view.addLabel("ゲートキーパー: Thr315", {'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
         
-    # 薬（STI: イマチニブのPDBコード）にもラベルをつける
     view.addLabel("薬（イマチニブ類似体）", {'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
-    
-    # 視点を結合ポケット周辺にクローズアップ
     view.zoomTo({'resn': 'STI'})
     
-    # Streamlit画面に3Dモデルを表示
-    showmol(view, height=500, width=600)
+    # HTMLソースコードに変換してStreamlitのコンポーネントとして出力
+    html_source = view._make_html()
+    components.html(html_source, height=500, width=600)
     
     st.info("💡 **親子で観察しよう！** 中央の太い分子が「薬」で、それを取り囲む薄いリボンが「タンパク質（鍵穴）」です。緑色（または黄色）のアミノ酸の壁と、薬の距離感に注目してください！")
