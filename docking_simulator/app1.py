@@ -1,6 +1,7 @@
 import streamlit as st
 import py3Dmol
 import streamlit.components.v1 as components
+import urllib.request
 
 # ページ設定
 st.set_page_config(
@@ -15,30 +16,51 @@ st.write("白血病の原因タンパク質「BCR-ABL」と、薬「イマチニ
 st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
 st.caption("📱 画面内をスワイプ（ドラッグ）して好きな角度からポケットを覗き込めます")
 
-# --- py3Dmolによる3Dモデル構築（Surface＆ゴミ分子除去 確定版） ---
-view = py3Dmol.view(query='pdb:1IEP', width=350, height=350)
+# --- オンラインからPDBファイルを確実にテキストとして取得 ---
+@st.cache_data
+def get_pdb_data():
+    url = "https://files.rcsb.org/download/1IEP.pdb"
+    with urllib.request.urlopen(url) as response:
+        return response.read().decode('utf-8')
 
-# 【ここが最重要修正！】
-# 1. まず、データ内の全ての表示スタイルを一旦デフォルト（ワイヤーフレーム等）も含めて完全に消去します
-view.setStyle({}, {})
+try:
+    pdb_text = get_pdb_data()
+    
+    # 【バグ対策】PDBデータから「チェーンA」と「薬（STI）」の行だけを純粋に抽出し、ゴミ分子(GOL)やBチェーンを物理的に消去した新しいPDBデータを作成します
+    filtered_lines = []
+    for line in pdb_text.splitlines():
+        if line.startswith(("ATOM", "HETATM")):
+            # チェーン名がAのもの、または薬(STI)だけを残す
+            chain = line[21].strip()
+            res_name = line[17:20].strip()
+            if res_name == "GOL" or res_name == "HOH": # ゴミ分子と水はスキップ
+                continue
+            if chain == "A" or chain == "":
+                filtered_lines.append(line)
+        elif line.startswith(("CONECT", "MASTER", "END")):
+            filtered_lines.append(line)
+            
+    clean_pdb = "\n".join(filtered_lines)
 
-# 2. 「チェーンAのタンパク質（アミノ酸）」だけを指定して、確実にSurfaceを描画させます
-# 'VDW'ではなく、よりエラーに強く安定した 'MS'（Molecular Surface）で文字列指定します
-view.addSurface("MS", {
-    'opacity': 0.9,
-    'colorscheme': 'pqp'  # 極性＝ピンク〜紫、疎水性＝白
-}, {'chain': 'A', 'protein': True})
+    # 空のビューアを作成して、綺麗にしたPDBデータを直接流し込む
+    view = py3Dmol.view(width=350, height=350)
+    view.addModel(clean_pdb, "pdb")
+    view.setStyle({}, {})
 
-# 3. 薬（STI）をチェーンAのもの「だけ」指定して、太めのスティックモデルでくっきり重ねて表示
-view.setStyle({'chain': 'A', 'resn': 'STI'}, {
-    'stick': {'colorscheme': 'greenCarbon', 'radius': 0.35}
-})
+    # 【確実なSurface化】文字列で直接 "MS"（分子表面）を指定し、チェーンAのタンパク質のみもこもこにする
+    view.addSurface("MS", {
+        'opacity': 0.9,
+        'colorscheme': 'pqp' # 極性＝ピンク〜紫、疎水性＝白
+    }, {'chain': 'A', 'protein': True})
 
-# 4. 【不要分子の完全除去】
-# チェーンB、水分子（HOH）、そしてピンクの謎のゴミ分子（グリセロール等＝残基名 GOL）を完全に非表示スタイルにします
-view.setStyle({'chain': 'B'}, {})
-view.setStyle({'resn': 'HOH'}, {})
-view.setStyle({'resn': 'GOL'}, {})
+    # 薬（STI）を太めのスティックモデルでくっきり重ねて表示
+    view.setStyle({'resn': 'STI'}, {
+        'stick': {'colorscheme': 'greenCarbon', 'radius': 0.35}
+    })
+
+except Exception as e:
+    st.error("データの読み込みに失敗しました。ネット環境を確認してください。")
+    view = py3Dmol.view(width=350, height=350)
 
 st.divider()
 
@@ -72,14 +94,14 @@ size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max
 
 # 3DのThr315の演出
 if size > 3:
-    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.5}})
-    view.addLabel("💥衝突注意: Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
+    view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.5}})
+    view.addLabel("💥衝突注意: Thr315", {'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
 else:
-    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'magentaCarbon', 'radius': 0.35}})
-    view.addLabel("Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
+    view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'magentaCarbon', 'radius': 0.35}})
+    view.addLabel("Thr315", {'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
 
-view.addLabel("開発中の薬", {'chain': 'A', 'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
-view.zoomTo({'chain': 'A', 'resn': 'STI'})
+view.addLabel("開発中の薬", {'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
+view.zoomTo({'resn': 'STI'})
 
 # HTML埋め込み表示（スマホサイズ）
 html_source = view._make_html()
