@@ -97,26 +97,26 @@ view.setStyle({}, {})
 #   A鎖（Chain A）だけに限定して描画します。
 CHAIN = "A"
 
-# タンパク質のうち、薬（イマチニブ）周辺のポケット部分（10Å以内、残基単位）だけを対象にする
-# ★このセレクションを Surface にも zoomTo にも共通で使うのがポイント
-POCKET_SELECTION = {
+# タンパク質（A鎖のみ・HETATMと水を除く）を対象にする
+# ★前回、"within"（〇Å以内）という距離指定のセレクタを使ったところ、
+#   このバージョンの3Dmol.jsでは正しく解釈されずJavaScriptエラーが発生し、
+#   Surfaceどころか薬（リガンド）も含めて何も表示されなくなってしまいました。
+#   → 確実に動作する、距離指定なしのシンプルな範囲指定に戻します。
+PROTEIN_SELECTION = {
     "chain": CHAIN,
     "hetflag": False,
     "water": False,
-    "within": {"distance": 10, "sel": {"chain": CHAIN, "resn": "STI"}},
-    "byres": True,
 }
 
-# ★これまでSurface自体は生成されていましたが、zoomTo()を薬（リガンド）だけに
-#   絞っていたため、カメラがタンパク質を含まない極端に狭い範囲にズームしてしまい、
-#   結果的にSurfaceが画面の外（視界外）に出てしまっていました。
-#   → Surfaceと同じ範囲（ポケット周辺）にzoomToすることで解消します。
-#   また、Thr315はこのポケット範囲に含まれるため、特別なスティック表示をしなくても
+# ★zoomToを薬（リガンド）だけに絞っていたため、カメラがタンパク質を含まない
+#   狭い範囲にズームしてしまい、Surfaceが画面の外に出てしまっていました。
+#   → Surfaceと同じ「A鎖」全体にzoomToすることで解消します。
+#   Thr315もA鎖に含まれるため、特別なスティック表示をしなくても
 #   自然にSurfaceの一部として表示されます。
 view.addSurface(py3Dmol.VDW, {
     "opacity": 0.9,
     "color": "#c7c2f0"
-}, POCKET_SELECTION)
+}, PROTEIN_SELECTION)
 
 # 薬（イマチニブ = STI、A鎖のもの1つだけ）はスティック表示で重ねる
 view.setStyle({"chain": CHAIN, "resn": "STI"}, {
@@ -154,7 +154,7 @@ with tab3:
 philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）", min_value=1, max_value=3, value=2)
 size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
 
-view.zoomTo(POCKET_SELECTION)
+view.zoomTo({"chain": CHAIN})
 
 # ==============================================================
 # ④ HTML埋め込み表示（スマホサイズ）
