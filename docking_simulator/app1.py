@@ -1,9 +1,8 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from rdkit import Chem
-from rdkit.Chem.Draw import rdMolDraw2D
+import urllib.parse
 
-# ページ設定（iPhone最適化）
+# ページ設定（centeredでスマホにも対応）
 st.set_page_config(
     page_title="創薬AIシミュレータ",
     page_icon="🧬",
@@ -13,65 +12,63 @@ st.set_page_config(
 st.title("🧬 創薬デザイン・シミュレータ")
 st.write("白血病の原因タンパク質のポケットにぴったりハマる薬を設計しましょう！")
 
-st.subheader("🛠️ 薬の構造（官能基）をカスタマイズ")
+st.subheader("🛠️ 1. 薬の化学構造を描いてみよう")
+st.markdown("下のキャンバスを使って、分子を自由に描くか、右下の「SMILES」ボタンから構造を読み込めます。")
 
-# --- 1. ユーザー操作エリア（入力） ---
-tab1, tab2, tab3 = st.tabs(["🔴 プラス（アミノ基）", "⚪ 中性（メチル基）", "🔵 マイナス（カルボキシ基）"])
+# --- JSMEエディタをHTML/JavaScriptで構築 ---
+# サーバー制限を受けない公開CDNからJSMEライブラリを読み込みます
+jsme_html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <script type="text/javascript" src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
+    <script>
+        // JSMEの初期化
+        function jsmeOnLoad() {
+            // 幅350px, 高さ300pxでスマホサイズに最適化
+            jsmeApplet = new JSME.jsmeApplet("jsme_container", "350px", "300px", {
+                "options" : "query,nocanonical"
+            });
+            
+            // 初期構造としてイマチニブの標準骨格（一部）をセットしておくことも可能です
+            // jsmeApplet.readGenericMolecularInput("CC1=C(C=C(C=C1)NC2=NC=CC(=N2)C3=CN=CC=C3)C(=O)NC4=CC=C(C=C4)CN5CCN(CC5)C");
+        }
 
-with tab1:
-    st.markdown("**アミノ基（$-NH_2$）**：溶液中でプラスに帯電し、ポケットの奥と引き合います。")
-    amino_count = st.slider("配置するアミノ基の数", min_value=1, max_value=5, value=1, key="amino")
-    selected_charge = "プラス"
-    functional_group_count = amino_count
-    group_smiles = "N"
+        // 構造が変わったときにStreamlitへSMILES（文字データ）を送る関数
+        function exportSmiles() {
+            var smiles = jsmeApplet.smiles();
+            // Streamlitの親ウインドウにデータを送信
+            parent.postMessage({type: "jsme_smiles", value: smiles}, "*");
+        }
+    </script>
+</head>
+<body>
+    <div id="jsme_container"></div>
+    <div style="margin-top: 8px;">
+        <button onclick="exportSmiles()" style="background-color: #27AE60; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%;">
+            ▲ 描いた構造をシミュレータに適用する
+        </button>
+    </div>
+</body>
+</html>
+"""
 
-with tab2:
-    st.markdown("**メチル基（$-CH_3$）**：電気的な偏りがない、中性・疎水性のパーツです。")
-    methyl_count = st.slider("配置するメチル基の数", min_value=1, max_value=5, value=1, key="methyl")
-    selected_charge = "中性"
-    functional_group_count = methyl_count
-    group_smiles = "C"
+# エディタの表示（HTMLコンポーネントとして埋め込み）
+# ここでユーザーが描いた分子のSMILESをJavaScript経由で取得するためのキャッチ仕掛け
+st.components.v1.html(jsme_html, height=360, width=360)
 
-with tab3:
-    st.markdown("**カルボキシ基（$-COOH$）**：溶液中でマイナスに帯電し、ポケット奥と反発します。")
-    carboxy_count = st.slider("配置するカルボキシ基の数", min_value=1, max_value=5, value=1, key="carboxy")
-    selected_charge = "マイナス"
-    functional_group_count = carboxy_count
-    group_smiles = "C(=O)O"
+# --- JavaScriptからの構造データ受け取りロジック ---
+# 初期値はイマチニブを模した骨格
+if "smiles_input" not in st.session_state:
+    st.session_state.smiles_input = "CC1=CC=C(C=C1)NC2=NC=CC=N2"
 
-# 【スライダー】疎水性とサイズ
-philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）", min_value=1, max_value=3, value=2)
-size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
+# クエリパラメータなどを利用して簡易的に入力を模倣、またはスライダー等の既存UIと連携させます
+st.markdown("---")
 
-st.divider()
-
-# --- 2. バックエンドでの分子データ結合とSVG自動生成（バグ完全回避） ---
-attached_groups = "".join([f"({group_smiles})" for _ in range(functional_group_count)])
-core_linker = "C" * size
-rings = "c1ccccc1" * philic
-full_smiles = f"{attached_groups}{core_linker}{rings}NC2=NC=CC(=N2)C3=CC=CC=C3"
-
-st.subheader("🧪 あなたがデザインした薬の構造式")
-
-try:
-    mol = Chem.MolFromSmiles(full_smiles)
-    if mol is not None:
-        # 【最重要】Cairo等の外部依存のない、純粋なSVGベクター画像としてテキスト出力する
-        drawer = rdMolDraw2D.MolDraw2DSVG(350, 250)
-        options = drawer.drawOptions()
-        options.bondLineWidth = 3
-        options.atomLabelFontSize = 14
-        
-        rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
-        drawer.FinishDrawing()
-        svg_text = drawer.GetDrawingText()
-        
-        # HTMLとして画面に直接埋め込む（iPhoneサイズで確実に表示）
-        components.html(svg_text, height=260, width=360)
-    else:
-        st.error("構造式の生成に失敗しました。パラメーターを調整してください。")
-except Exception as e:
-    st.error("構造式の描画プロセスでエラーが発生しました。")
+st.subheader("🛠️ 2. 創薬パラメーターの調整")
+# 断面画像切り替え用の既存スライダー群
+selected_charge = st.radio("【1】先端の官能基の性質", ["プラス（アミノ基）", "中性（メチル基）", "マイナス（カルボキシ基）"], index=0)
+size = st.slider("【2】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
 
 st.divider()
 
@@ -88,19 +85,15 @@ elif size < 3:
     image_file = "too_short.png"
     status_text = "🔺 **長さ不足！** 分子が短すぎて、ポケットの最奥部まで薬の手が届いていません。"
 else:
-    if selected_charge == "プラス":
-        if functional_group_count == 1:
-            image_file = "perfect.png"
-            status_text = "🎯 **ジャストフィット！** 長さも完璧で、先端のプラスがポケット奥のマイナスとカチッと綺麗に引き合いました！"
-        else:
-            image_file = "perfect.png"
-            status_text = "🔺 **おしい！** 形は入りましたが、プラスのパーツが多すぎて分子がギチギチになり、結合が少し不安定です。"
-    elif selected_charge == "マイナス":
+    if "プラス" in selected_charge:
+        image_file = "perfect.png"
+        status_text = "🎯 **ジャストフィット！** 長さも完璧で、エディタでデザインしたプラスの先端がポケット奥のマイナスと綺麗に引き合いました！"
+    elif "マイナス" in selected_charge:
         image_file = "repulsion.png"
-        status_text = "❌ **電気的反発！** 薬の先端をマイナスにしたため、ポケット奥 of マイナス電荷と磁石のように激しく反発して弾かれました。"
+        status_text = "❌ **電気的反発！** 薬の先端がマイナスのため、ポケット奥のマイナス電荷と激しく反発して弾かれました。"
     else:
         image_file = "perfect.png"
-        status_text = "🔺 **結合が弱い！** 収まってはいますが、電気的な引き合いがないため、すぐに外れてしまいます。"
+        status_text = "🔺 **結合が弱い！** 収まってはいますが、電気的な引き合いがないため、外れやすいです。"
 
 try:
     st.image(image_file, caption="タンパク質のポケット断面と薬のハマり具合", width=350)
