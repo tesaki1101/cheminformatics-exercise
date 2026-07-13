@@ -15,17 +15,18 @@ st.write("白血病の原因タンパク質「BCR-ABL」と、薬「イマチニ
 st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
 st.caption("📱 画面内をスワイプ（ドラッグ）して好きな角度からポケットを覗き込めます")
 
-# --- py3Dmolによる3Dモデル構築（安定型もこもこ再現版） ---
+# --- py3Dmolによる3Dモデル構築（滑らかなSurface完全指定版） ---
 view = py3Dmol.view(query='pdb:1IEP', width=350, height=350)
 view.setStyle({}, {})
 
-# 【バグを完全回避】addSurfaceを使わず、全原子のサイズを大きくして滑らかなもこもこ壁を作ります
-# チェーンAのタンパク質を極性カラー（pqp）で立体化
-view.setStyle({'chain': 'A', 'elem': ['C', 'N', 'O', 'S']}, {
-    'sphere': {'colorscheme': 'pqp', 'radius': 1.6, 'opacity': 0.9}
-})
+# 【ここを修正！】文字列で直接 'VDW' 表面を指定することで、エラーを回避しつつ滑らかなもこもこ壁を描画します
+# チェーンAのタンパク質のみを対象にSurfaceを生成
+view.addSurface("VDW", {
+    'opacity': 0.9,
+    'colorscheme': 'pqp'  # 極性＝ピンク〜紫、疎水性＝白
+}, {'chain': 'A', 'protein': True})
 
-# 薬（STI）を太めのスティックモデルでくっきり重ねて表示
+# 薬（STI）をチェーンAのものだけ抽出し、太めのスティックモデルでくっきり重ねて表示
 view.setStyle({'chain': 'A', 'resn': 'STI'}, {
     'stick': {'colorscheme': 'greenCarbon', 'radius': 0.35}
 })
@@ -60,17 +61,17 @@ with tab3:
     selected_charge = "マイナス"
     functional_group_count = carboxy_count
 
-# 【既存のスライダー】疎水性とサイズ
+# 疎水性とサイズ
 philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）", min_value=1, max_value=3, value=2)
 size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
 
-# 3DのThr315の演出（サイズ変更によるハイライト切り替え）
+# 3DのThr315の演出
 if size > 3:
-    view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'yellowCarbon', 'radius': 1.8}})
+    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.5}})
     view.addLabel("💥衝突注意: Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
 else:
-    # 薬が綺麗に収まっているときは、周りの壁と同化させておくか、見やすくマゼンタで表示
-    view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'pqp', 'radius': 1.6}})
+    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'magentaCarbon', 'radius': 0.35}})
+    view.addLabel("Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
 
 view.addLabel("開発中の薬", {'chain': 'A', 'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
 view.zoomTo({'chain': 'A', 'resn': 'STI'})
