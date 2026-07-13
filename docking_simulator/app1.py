@@ -91,38 +91,26 @@ view.addModel(pdb_text, "pdb")
 # まず全原子を非表示にする（この上にSurfaceと薬だけを描画する）
 view.setStyle({}, {})
 
-# アミノ酸の性質ごとの色マップ（高校化学の知識と直結）
-#   白　　　= 疎水性（電気的に偏りが少ない）
-#   黄緑　　= 極性・中性（弱い水素結合はできるが電荷なし）
-#   青　　　= プラスに帯電しやすい（塩基性アミノ酸）
-#   赤　　　= マイナスに帯電しやすい（酸性アミノ酸）
-RESIDUE_COLOR_MAP = {
-    "ALA": "white", "VAL": "white", "LEU": "white", "ILE": "white",
-    "MET": "white", "PHE": "white", "TRP": "white", "PRO": "white", "GLY": "white",
-    "SER": "lightgreen", "THR": "lightgreen", "CYS": "lightgreen",
-    "TYR": "lightgreen", "ASN": "lightgreen", "GLN": "lightgreen",
-    "LYS": "skyblue", "ARG": "skyblue", "HIS": "skyblue",
-    "ASP": "salmon", "GLU": "salmon",
-}
+# ★修正: 1IEPには2本のタンパク質鎖（A鎖・B鎖）が含まれ、それぞれに
+#   薬（イマチニブ=STI）が1つずつ結合しています。そのままだと
+#   「化合物が2つ」「表面がまばらで出ない」原因になるため、
+#   A鎖（Chain A）だけに限定して描画します。
+CHAIN = "A"
 
-# タンパク質のうち、薬（STI）の周辺9Å以内だけをSurface表示
-# → 「ポケット（鍵穴）」だけがきれいに浮き上がって見える
+# タンパク質（A鎖のみ・HETATMと水を除く）のSurfaceを表示
+# ※色指定は最も確実に描画される単色＋半透明にしています
 view.addSurface(py3Dmol.VDW, {
     "opacity": 0.85,
-    "colorscheme": {"prop": "resn", "map": RESIDUE_COLOR_MAP}
+    "color": "white"
 }, {
+    "chain": CHAIN,
     "hetflag": False,
-    "water": False,
-    "within": {"distance": 9, "sel": {"resn": "STI"}},
-    "byres": True
+    "water": False
 })
 
-# 薬（イマチニブ = STI）はスティック表示で重ねる
-view.setStyle({"resn": "STI"}, {
+# 薬（イマチニブ = STI、A鎖のもの1つだけ）はスティック表示で重ねる
+view.setStyle({"chain": CHAIN, "resn": "STI"}, {
     "stick": {"colorscheme": "greenCarbon", "radius": 0.35}
-})
-view.addLabel("💊 開発中の薬", {"resn": "STI"}, {
-    "backgroundColor": "navy", "backgroundOpacity": 0.85, "fontSize": 12
 })
 
 st.divider()
@@ -157,22 +145,17 @@ philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）",
 size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
 
 # Thr315（ゲートキーパー残基）の見た目を、リンカー長に応じて動的に変更
+# ※テキストラベルは表示せず、色の変化だけで衝突を表現する
 if size > 3:
-    view.addStyle({"resi": 315, "chain": "A", "hetflag": False}, {
+    view.addStyle({"resi": 315, "chain": CHAIN, "hetflag": False}, {
         "stick": {"color": "red", "radius": 0.5}
     })
-    view.addLabel("💥衝突注意: Thr315", {"resi": 315, "chain": "A", "hetflag": False}, {
-        "backgroundColor": "red", "backgroundOpacity": 0.9
-    })
 else:
-    view.addStyle({"resi": 315, "chain": "A", "hetflag": False}, {
+    view.addStyle({"resi": 315, "chain": CHAIN, "hetflag": False}, {
         "stick": {"color": "orange", "radius": 0.35}
     })
-    view.addLabel("Thr315（ゲートキーパー）", {"resi": 315, "chain": "A", "hetflag": False}, {
-        "backgroundColor": "darkgreen", "backgroundOpacity": 0.8
-    })
 
-view.zoomTo({"resn": "STI"})
+view.zoomTo({"chain": CHAIN, "resn": "STI"})
 
 # ==============================================================
 # ④ HTML埋め込み表示（スマホサイズ）
@@ -181,9 +164,8 @@ html_source = view._make_html()
 components.html(html_source, height=380, width=360)
 
 st.info(
-    "💡 **色の見方（ポケット表面）**：\n"
-    "⚪ 白＝疎水性（油っぽい場所）　🟢 黄緑＝極性・中性　🔵 青＝プラス電荷　🔴 赤＝マイナス電荷\n\n"
-    "薬の官能基と同じ色のところが「相性がいい場所」です。親子で「ここは何色？」と話しながら探してみましょう！"
+    "💡 **見方**：半透明の白い壁＝タンパク質のポケット（鍵穴）の表面、緑のスティック＝薬（イマチニブ）です。\n\n"
+    "オレンジ色の部分は「Thr315」という重要なアミノ酸（ゲートキーパー）。薬の分子が長すぎるとここに衝突し、赤色に変わります。"
 )
 if not using_real_structure:
     st.caption("（現在は簡易モデル表示中。ネットワーク接続が回復すると実際の結晶構造で表示されます）")
