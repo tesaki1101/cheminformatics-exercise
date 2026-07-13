@@ -98,10 +98,11 @@ view.setStyle({}, {})
 CHAIN = "A"
 
 # タンパク質（A鎖のみ・HETATMと水を除く）のSurfaceを表示
-# ※色指定は最も確実に描画される単色＋半透明にしています
-view.addSurface(py3Dmol.VDW, {
-    "opacity": 0.85,
-    "color": "white"
+# ※前回「白」を指定していたところ、背景色（白）と同化して見えなくなっていたため、
+#   はっきり区別できる淡いラベンダー色に変更。あわせて滑らかな分子表面(MS)にしています。
+view.addSurface(py3Dmol.MS, {
+    "opacity": 0.9,
+    "color": "#c7c2f0"
 }, {
     "chain": CHAIN,
     "hetflag": False,
@@ -144,17 +145,6 @@ with tab3:
 philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）", min_value=1, max_value=3, value=2)
 size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
 
-# Thr315（ゲートキーパー残基）の見た目を、リンカー長に応じて動的に変更
-# ※テキストラベルは表示せず、色の変化だけで衝突を表現する
-if size > 3:
-    view.addStyle({"resi": 315, "chain": CHAIN, "hetflag": False}, {
-        "stick": {"color": "red", "radius": 0.5}
-    })
-else:
-    view.addStyle({"resi": 315, "chain": CHAIN, "hetflag": False}, {
-        "stick": {"color": "orange", "radius": 0.35}
-    })
-
 view.zoomTo({"chain": CHAIN, "resn": "STI"})
 
 # ==============================================================
@@ -164,8 +154,7 @@ html_source = view._make_html()
 components.html(html_source, height=380, width=360)
 
 st.info(
-    "💡 **見方**：半透明の白い壁＝タンパク質のポケット（鍵穴）の表面、緑のスティック＝薬（イマチニブ）です。\n\n"
-    "オレンジ色の部分は「Thr315」という重要なアミノ酸（ゲートキーパー）。薬の分子が長すぎるとここに衝突し、赤色に変わります。"
+    "💡 **見方**：半透明の紫色の壁＝タンパク質のポケット（鍵穴）の表面、緑のスティック＝薬（イマチニブ）です。"
 )
 if not using_real_structure:
     st.caption("（現在は簡易モデル表示中。ネットワーク接続が回復すると実際の結晶構造で表示されます）")
