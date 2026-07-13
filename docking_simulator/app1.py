@@ -15,25 +15,22 @@ st.write("白血病の原因タンパク質「BCR-ABL」と、薬「イマチニ
 st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
 st.caption("📱 画面内をスワイプ（ドラッグ）して好きな角度からポケットを覗き込めます")
 
-# --- py3Dmolによる3Dモデル構築（滑らかなSurface再現版） ---
+# --- py3Dmolによる3Dモデル構築（安定型もこもこ再現版） ---
 view = py3Dmol.view(query='pdb:1IEP', width=350, height=350)
 view.setStyle({}, {})
 
-# 【添付画像の見え方を再現】
-# タンパク質（Aチェーン）に滑らかなSurfaceを適用。内側の空洞（ポケット）が綺麗に見えるようにします
-view.addSurface(py3Dmol.SURFACE, {
-    'opacity': 0.9,
-    'colorscheme': 'pqp',  # 極性＝ピンク〜紫、疎水性＝白
-    'state': {'chain': 'A'}
-}, {'chain': 'A', 'protein': True})
-
-# 薬（STI）を太めの球棒（スティック）モデルでくっきり重ねて表示
-view.setStyle({'chain': 'A', 'resn': 'STI'}, {
-    'stick': {'colorscheme': 'greenCarbon', 'radius': 0.3},
-    'sphere': {'scale': 0.3}
+# 【バグを完全回避】addSurfaceを使わず、全原子のサイズを大きくして滑らかなもこもこ壁を作ります
+# チェーンAのタンパク質を極性カラー（pqp）で立体化
+view.setStyle({'chain': 'A', 'elem': ['C', 'N', 'O', 'S']}, {
+    'sphere': {'colorscheme': 'pqp', 'radius': 1.6, 'opacity': 0.9}
 })
 
-# 不要なBチェーンや水分子を非表示
+# 薬（STI）を太めのスティックモデルでくっきり重ねて表示
+view.setStyle({'chain': 'A', 'resn': 'STI'}, {
+    'stick': {'colorscheme': 'greenCarbon', 'radius': 0.35}
+})
+
+# 不要なBチェーンや水分子を完全非表示
 view.setStyle({'chain': 'B'}, {})
 view.setStyle({'resn': 'HOH'}, {})
 
@@ -42,7 +39,7 @@ st.divider()
 st.subheader("🛠️ 創薬パラメーターの調整")
 st.markdown("高校化学の知識を使い、官能基の種類と数を変えて「薬とポケットの相性」を変化させてみましょう。")
 
-# 【機能追加】官能基の電気的性質をタブで切り替え
+# 官能基の電気的性質をタブで切り替え
 tab1, tab2, tab3 = st.tabs(["🔴 プラス（アミノ基）", "⚪ 中性（メチル基）", "🔵 マイナス（カルボキシ基）"])
 
 with tab1:
@@ -67,20 +64,20 @@ with tab3:
 philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）", min_value=1, max_value=3, value=2)
 size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
 
-# 3DのThr315の演出とラベル（衝突判定）
+# 3DのThr315の演出（サイズ変更によるハイライト切り替え）
 if size > 3:
-    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
+    view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'yellowCarbon', 'radius': 1.8}})
     view.addLabel("💥衝突注意: Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
 else:
-    view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'magentaCarbon', 'radius': 0.3}})
-    view.addLabel("Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
+    # 薬が綺麗に収まっているときは、周りの壁と同化させておくか、見やすくマゼンタで表示
+    view.addStyle({'chain': 'A', 'resi': 315}, {'sphere': {'colorscheme': 'pqp', 'radius': 1.6}})
 
 view.addLabel("開発中の薬", {'chain': 'A', 'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
 view.zoomTo({'chain': 'A', 'resn': 'STI'})
 
 # HTML埋め込み表示（スマホサイズ）
 html_source = view._make_html()
-st.components.v1.html(html_source, height=360, width=360)
+components.html(html_source, height=360, width=360)
 
 st.info("💡 **データの見方**：もこもこした壁がタンパク質のポケットです。ピンク〜紫の部分が『極性（電気的な性質がある場所）』、白色の部分が『疎水性（油っぽい場所）』です。")
 
@@ -91,11 +88,10 @@ st.markdown("### 🔍 現在の結合シミュレーション解説")
 
 score = 0
 
-# 電荷と数の判定（実際のイマチニブはプラスのアミノ基が1つ綺麗に噛み合うのがベスト）
 if selected_charge == "プラス":
     if functional_group_count == 1:
         score += 40
-        st.success(f"⭕ **電荷:** 素晴らしい！アミノ基が1つ配置され、ポケット奥のマイナスアミノ酸と磁石のように完璧に引き合いました！（静電相互作用）")
+        st.success("⭕ **電荷:** 素晴らしい！アミノ基が1つ配置され、ポケット奥のマイナスアミノ酸と磁石のように完璧に引き合いました！（静電相互作用）")
     else:
         score += 25
         st.warning(f"🔺 **電荷:** プラスのアミノ基が{functional_group_count}個は多すぎます。引き合いは生じますが、分子が大きくなりすぎてポケットの形を歪めてしまいます。")
@@ -106,7 +102,6 @@ else:
     score += 15
     st.warning(f"🔺 **電荷:** 中性のメチル基が{functional_group_count}個配置されました。電気的な反発は起きませんが、引き合う力も生まれません。")
     
-# 疎水性の判定
 if philic == 3:
     score += 30
     st.success("⭕ **疎水性:** ベンゼン環が3つになり、ポケットの油っぽい領域と完璧に密着しました。")
@@ -117,7 +112,6 @@ else:
     score += 10
     st.error("❌ **疎水性:** ベンゼン環が1つでは油っぽさが足りず、周りの水分子に邪魔されて滑り落ちてしまいます。")
 
-# サイズの判定
 if size == 3:
     score += 30
     st.success("⭕ **サイズ:** 完璧な長さです！「Thr315」の壁をすり抜けて奥まで届いています。")
