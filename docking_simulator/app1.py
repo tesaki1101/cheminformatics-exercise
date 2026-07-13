@@ -51,8 +51,10 @@ with col1:
         score += 40
         st.success("⭕ **電荷:** ポケット奥のマイナスアミノ酸（Asp381等）と、薬のプラス（アミノ基）が磁石のように強烈に引き合っています！（静電相互作用）")
     elif "マイナス" in charge:
+        score += 0
         st.error("❌ **電荷:** マイナス同士が反発！磁石の同極のように薬が弾き飛ばされてしまいます。")
     else:
+        score += 15
         st.warning("🔺 **電荷:** 反発はしませんが、強い引き合いも生まれず、結合が弱いです。")
         
     if philic == 3:
@@ -62,6 +64,7 @@ with col1:
         score += 25
         st.info("🔺 **疎水性:** イマチニブの標準骨格です。十分良好な結合です。")
     else:
+        score += 10
         st.error("❌ **疎水性:** 油っぽさが足りず、周りの水分子に邪魔されてポケットから滑り落ちてしまいます。")
 
     if size == 3:
@@ -71,6 +74,7 @@ with col1:
         score -= 15
         st.error("💥 **立体障害発生:** 分子が長すぎます！3Dモデルで黄色く光っている『Thr315』の壁に激突し、ポケットに入りません！")
     else:
+        score += 10
         st.warning("🔺 **サイズ:** 短すぎます！奥のポケットまで手が届いていません。")
 
     score = max(0, min(100, score))
@@ -78,30 +82,42 @@ with col1:
 
 with col2:
     st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
-    st.caption("💻 マウス左ドラッグ：回転 / 右ドラッグ：移動 / ホイール：拡大縮小")
+    st.caption("💻 画面内をドラッグすると、好きな角度からポケットの奥を覗き込めます")
     
-    # --- py3Dmolによる3Dモデル構築（HTML直接埋め込み型） ---
+    # --- py3Dmolによる3Dモデル構築（Surface ＆ 単一チェーン化） ---
     view = py3Dmol.view(query='pdb:1IEP', width=600, height=500)
     
-    # タンパク質全体を薄い灰色のリボンで表示
-    view.setStyle({'protein': True}, {'cartoon': {'color': '#e0e0e0', 'opacity': 0.8}})
+    # 1. 不要な他の対称分子などを非表示にし、「チェーンA」のタンパク質だけを表示
+    # 極性（親水性・疎水性）が直感的にわかるカラー（コサダの親水性スケールなど）でサーフェス化
+    view.addSurface(py3Dmol.VDW, {
+        'opacity': 0.85, 
+        'colorscheme': 'pqp', # Polar/Non-polarで色分け（極性=ピンク〜紫、非極性/疎水性=白〜カーボン色）
+        'state': {'chain': 'A'}
+    }, {'protein': True, 'chain': 'A'})
     
-    # 薬（イマチニブ）をスティックモデルで表示
-    view.setStyle({'hetero': True}, {'stick': {'colorscheme': 'cyanCarbon', 'radius': 0.3}})
+    # 2. 薬（イマチニブ：残基名 STI）を、サーフェスの上に重ねてくっきり表示
+    # 元素色（炭素=緑、窒素=青、酸素=赤）の球棒（stick/sphere）モデルで目立たせる
+    view.setStyle({'resn': 'STI'}, {
+        'stick': {'colorscheme': 'greenCarbon', 'radius': 0.2},
+        'sphere': {'scale': 0.3}
+    })
     
-    # 超重要アミノ酸「スレオニン315 (Thr315)」のハイライト演出
+    # 3. ゲートキーパー「スレオニン315 (Thr315)」のハイライト演出
+    # スライダーでサイズが「長すぎ(>3)」になったら、警告としてThr315の場所を強調
     if size > 3:
-        view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
-        view.addLabel("💥衝突注意: Thr315の壁", {'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.8})
+        view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
+        view.addLabel("💥衝突: Thr315の壁", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.9})
     else:
-        view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'greenCarbon', 'radius': 0.3}})
-        view.addLabel("ゲートキーパー: Thr315", {'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
+        view.addStyle({'chain': 'A', 'resi': 315}, {'stick': {'colorscheme': 'magentaCarbon', 'radius': 0.3}})
+        view.addLabel("ゲートキーパー: Thr315", {'chain': 'A', 'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
         
-    view.addLabel("薬（イマチニブ類似体）", {'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
+    view.addLabel("開発中の薬", {'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
+    
+    # 薬が刺さっているポケット周辺にカメラをグッと近づける
     view.zoomTo({'resn': 'STI'})
     
-    # HTMLソースコードに変換してStreamlitのコンポーネントとして出力
+    # HTMLソースコードに変換してStreamlitに出力
     html_source = view._make_html()
     components.html(html_source, height=500, width=600)
     
-    st.info("💡 **親子で観察しよう！** 中央の太い分子が「薬」で、それを取り囲む薄いリボンが「タンパク質（鍵穴）」です。緑色（または黄色）のアミノ酸の壁と、薬の距離感に注目してください！")
+    st.info("💡 **データの見方:** 周りの「もこもこした壁」がタンパク質（チェーンA）のポケットです。色がついている部分が『極性（電気的な性質がある場所）』、白い部分が『疎水性（油っぽい場所）』です。薬が隙間にぴったり挟まっている様子をぐるぐる回して観察してください！")
