@@ -15,25 +15,30 @@ st.write("白血病の原因タンパク質「BCR-ABL」と、薬「イマチニ
 st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
 st.caption("📱 画面内をスワイプ（ドラッグ）して好きな角度からポケットを覗き込めます")
 
-# --- py3Dmolによる3Dモデル構築（滑らかなSurface完全指定版） ---
+# --- py3Dmolによる3Dモデル構築（Surface＆ゴミ分子除去 確定版） ---
 view = py3Dmol.view(query='pdb:1IEP', width=350, height=350)
+
+# 【ここが最重要修正！】
+# 1. まず、データ内の全ての表示スタイルを一旦デフォルト（ワイヤーフレーム等）も含めて完全に消去します
 view.setStyle({}, {})
 
-# 【ここを修正！】文字列で直接 'VDW' 表面を指定することで、エラーを回避しつつ滑らかなもこもこ壁を描画します
-# チェーンAのタンパク質のみを対象にSurfaceを生成
-view.addSurface("VDW", {
+# 2. 「チェーンAのタンパク質（アミノ酸）」だけを指定して、確実にSurfaceを描画させます
+# 'VDW'ではなく、よりエラーに強く安定した 'MS'（Molecular Surface）で文字列指定します
+view.addSurface("MS", {
     'opacity': 0.9,
     'colorscheme': 'pqp'  # 極性＝ピンク〜紫、疎水性＝白
 }, {'chain': 'A', 'protein': True})
 
-# 薬（STI）をチェーンAのものだけ抽出し、太めのスティックモデルでくっきり重ねて表示
+# 3. 薬（STI）をチェーンAのもの「だけ」指定して、太めのスティックモデルでくっきり重ねて表示
 view.setStyle({'chain': 'A', 'resn': 'STI'}, {
     'stick': {'colorscheme': 'greenCarbon', 'radius': 0.35}
 })
 
-# 不要なBチェーンや水分子を完全非表示
+# 4. 【不要分子の完全除去】
+# チェーンB、水分子（HOH）、そしてピンクの謎のゴミ分子（グリセロール等＝残基名 GOL）を完全に非表示スタイルにします
 view.setStyle({'chain': 'B'}, {})
 view.setStyle({'resn': 'HOH'}, {})
+view.setStyle({'resn': 'GOL'}, {})
 
 st.divider()
 
