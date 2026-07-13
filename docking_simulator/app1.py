@@ -84,24 +84,18 @@ with col2:
     st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
     st.caption("💻 画面内をドラッグすると、好きな角度からポケットの奥を覗き込めます")
     
-    # --- py3Dmolによる3Dモデル構築（Surface ＆ チェーンA抽出修正版） ---
+    # --- py3Dmolによる3Dモデル構築（エラー回避・スタイル上書き版） ---
     view = py3Dmol.view(query='pdb:1IEP', width=600, height=500)
     
-    # 【修正箇所1】一度すべての初期表示（ラインやワイヤーフレーム）を完全にクリアします
-    view.removeAllModels()
-    view.addModel(view.getModel(), "pdb")
+    # 【修正点】初期設定のワイヤーフレーム等の表示スタイルを、全分子に対して一回「空」にして非表示化します
+    view.setStyle({}, {})
     
-    # 【修正箇所2】明示的に「チェーンAのタンパク質のみ」を対象にしてSurfaceを生成
-    # カラーは極性・非極性が最もはっきり分かれる'pqp'（Polar/Non-polar）を採用
-    target_protein = {'chain': 'A', 'protein': True}
+    # チェーンAのタンパク質だけに「極性カラー（pqp）」のSurface（分子表面）を設定
+    # これによりチェーンBや水分子のSurfaceは作られず、ワイヤーフレームも消えます
     view.addSurface(py3Dmol.VDW, {
         'opacity': 0.85, 
         'colorscheme': 'pqp'
-    }, target_protein)
-    
-    # 【修正箇所3】他の不要なチェーン（Bチェーンや水分子など）を完全に非表示（空白スタイル）にする
-    view.setStyle({'chain': 'B'}, {})
-    view.setStyle({'resn': 'HOH'}, {}) # 水分子を非表示
+    }, {'chain': 'A', 'protein': True})
     
     # 薬（残基名 STI）を、サーフェスのポケットの上に重ねてくっきり球棒モデルで表示
     view.setStyle({'resn': 'STI'}, {
