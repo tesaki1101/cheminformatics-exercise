@@ -97,17 +97,26 @@ view.setStyle({}, {})
 #   A鎖（Chain A）だけに限定して描画します。
 CHAIN = "A"
 
-# タンパク質（A鎖のみ・HETATMと水を除く）のSurfaceを表示
-# ※前回「白」を指定していたところ、背景色（白）と同化して見えなくなっていたため、
-#   はっきり区別できる淡いラベンダー色に変更。あわせて滑らかな分子表面(MS)にしています。
-view.addSurface(py3Dmol.MS, {
-    "opacity": 0.9,
-    "color": "#c7c2f0"
-}, {
+# タンパク質のうち、薬（イマチニブ）周辺のポケット部分（10Å以内、残基単位）だけを対象にする
+# ★このセレクションを Surface にも zoomTo にも共通で使うのがポイント
+POCKET_SELECTION = {
     "chain": CHAIN,
     "hetflag": False,
-    "water": False
-})
+    "water": False,
+    "within": {"distance": 10, "sel": {"chain": CHAIN, "resn": "STI"}},
+    "byres": True,
+}
+
+# ★これまでSurface自体は生成されていましたが、zoomTo()を薬（リガンド）だけに
+#   絞っていたため、カメラがタンパク質を含まない極端に狭い範囲にズームしてしまい、
+#   結果的にSurfaceが画面の外（視界外）に出てしまっていました。
+#   → Surfaceと同じ範囲（ポケット周辺）にzoomToすることで解消します。
+#   また、Thr315はこのポケット範囲に含まれるため、特別なスティック表示をしなくても
+#   自然にSurfaceの一部として表示されます。
+view.addSurface(py3Dmol.VDW, {
+    "opacity": 0.9,
+    "color": "#c7c2f0"
+}, POCKET_SELECTION)
 
 # 薬（イマチニブ = STI、A鎖のもの1つだけ）はスティック表示で重ねる
 view.setStyle({"chain": CHAIN, "resn": "STI"}, {
@@ -145,7 +154,7 @@ with tab3:
 philic = st.slider("【2】ベンゼン環の数（油へなじみやすさ）", min_value=1, max_value=3, value=2)
 size = st.slider("【3】分子の長さ（リンカー長）", min_value=1, max_value=5, value=3)
 
-view.zoomTo({"chain": CHAIN, "resn": "STI"})
+view.zoomTo(POCKET_SELECTION)
 
 # ==============================================================
 # ④ HTML埋め込み表示（スマホサイズ）
