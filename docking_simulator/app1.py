@@ -1,123 +1,112 @@
 import streamlit as st
-import time
+from stmol import showmol
+import py3Dmol
 
 # ページ設定
 st.set_page_config(
-    page_title="AI創薬体験：画期的な抗がん剤イマチニブを作ろう！",
+    page_title="3D AI創薬シミュレータ：イマチニブの秘密",
     page_icon="🧬",
-    layout="wide" # 画面を広く使うためにwideに変更
+    layout="wide"
 )
 
-st.title("🧬 AI創薬体験：画期的な抗がん剤『イマチニブ』を設計せよ！")
-st.write("慢性骨髄性白血病の原因となるタンパク質「BCR-ABL」の鍵穴（ポケット）にぴったりハマる薬を設計しましょう。")
+st.title("🧬 3D AI創薬シミュレータ：奇跡の薬『イマチニブ』を体感せよ！")
+st.write("慢性骨髄性白血病の原因タンパク質「BCR-ABL」と、分子標的薬「イマチニブ」の3Dモデルです。マウスで回転や拡大ができます。")
 
 # 画面を2カラムに分割
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns([1, 1.2])
 
 with col1:
-    st.subheader("🛠️ 化合物（薬の候補）の構造改造")
-    st.markdown("高校化学の知識を使って、イマチニブの構造を変化させよう！")
+    st.subheader("🛠️ 創薬パラメーターの調整")
+    st.markdown("高校化学の知識を使い、スライダーを動かして「薬とポケットの相性」を変化させてみましょう。")
     
     # 1. 電荷（アミノ基の修飾）
     charge = st.radio(
-        "【1】官能基の変更（電気的な性質）",
-        options=["アミノ基を導入（プラス電気）", "メチル基を導入（中性）", "カルボキシ基を導入（マイナス電気）"],
+        "【1】官能基の電気的性質（電荷）",
+        options=["プラス（アミノ基を配置）", "中性（メチル基を配置）", "マイナス（カルボキシ基を配置）"],
         index=1
     )
     
     # 2. 疎水性（ベンゼン環などの油っぽさ）
     philic = st.slider(
-        "【2】ベンゼン環（芳香族）の数（油へなじみやすさ）",
-        min_value=1,
-        max_value=3,
-        value=2,
-        help="数を増やすほど、疎水性（油っぽさ）が上がり、タンパク質の油っぽい隙間に入りやすくなります。"
+        "【2】ベンゼン環の数（油へなじみやすさ）",
+        min_value=1, min_value=1, max_value=3, value=2,
+        help="数を増やすほど疎水性が上がり、タンパク質の油っぽい隙間（ポケット）に馴染みます。"
     )
     
     # 3. サイズ（分子の長さ・立体障害）
     size = st.slider(
-        "【3】分子の長さ（リンカーの長さ）",
-        min_value=1,
-        max_value=5,
-        value=3,
+        "【3】分子の長さ（リンカー長）",
+        min_value=1, max_value=5, value=3,
         help="長すぎるとアミノ酸の壁にぶつかり（立体障害）、短すぎると奥まで届きません。"
     )
 
-with col2:
-    st.subheader("🎯 標的：BCR-ABLタンパク質の鍵穴（ポケット情報）")
+    st.divider()
     
-    # ★ここがポイント：選択されたパラメーターに応じて、分子の「現在の状態」を視覚的に表示する
-    st.markdown("### 🔍 現在のあなたの化合物とポケットの状態")
+    # リアルタイムの化学変化解説
+    st.markdown("### 🔍 現在の結合シミュレーション解説")
     
-    # 状態の可視化ロジック
-    visual_status = []
-    
-    # 電荷の見た目変化
-    if "プラス" in charge:
-        visual_status.append("🔴 **あなたの分子:** `[プラス電荷(NH3+)]` ↔ 🔵 **ポケットの奥:** `[マイナス電荷(Glu286)]` \n➡️ **状態:** 磁石のように引き合っています！")
-    elif "マイナス" in charge:
-        visual_status.append("🔵 **あなたの分子:** `[マイナス電荷(COO-)]` ↔ 🔵 **ポケットの奥:** `[マイナス電荷(Glu286)]` \n➡️ **状態:** ⚡ 同士が反発して近づけません！")
-    else:
-        visual_status.append("⚪ **あなたの分子:** `[中性(CH3)]` ↔ 🔵 **ポケットの奥:** `[マイナス電荷(Glu286)]` \n➡️ **状態:** 反発しませんが、引き合いも起きません。")
-        
-    # 疎水性の見た目変化
-    if philic == 3:
-        visual_status.append("🧱 **ベンゼン環の数:** `[⬡]-[⬡]-[⬡]` (非常に油っぽい)\n➡️ **状態:** ポケットの疎水性ポケット（Ile, Leu）とガッチリ密着しています！")
-    elif philic == 2:
-        visual_status.append("🧱 **ベンゼン環の数:** `[⬡]-[⬡]` (適度な油っぽさ)\n➡️ **状態:** イマチニブの基本骨格です。良い密着度です。")
-    else:
-        visual_status.append("🧱 **ベンゼン環の数:** `[⬡]` (スカスカ)\n➡️ **状態:** 油っぽさが足りず、水分子に邪魔されてポケットから滑り落ちてしまいます。")
-
-    # サイズの見た目変化（立体障害の可視化）
-    gate_threonine = "🧬[Thr315の壁]"
-    if size > 3:
-        visual_status.append(f"📏 **分子の長さ:** `---分子の先端--->` 💥 {gate_threonine}\n➡️ **状態:** **立体障害発生！** 分子が長すぎて、ゲートキーパーであるアミノ酸（スレオニン315）に衝突しています！")
-    elif size == 3:
-        visual_status.append(f"📏 **分子の長さ:** `---分子の先端->` 🎯 {gate_threonine}の手前にすっぽり\n➡️ **状態:** 完璧な長さです！壁をすり抜けて奥のポケットに届いています。")
-    else:
-        visual_status.append(f"📏 **分子の長さ:** `--分子の先端>`     {gate_threonine}まで遠い\n➡️ **状態:** 短すぎます！奥のポケットまで手が届いていません。")
-
-    # ボックスで囲んでリアルタイム表示
-    for status in visual_status:
-        st.info(status)
-
-st.divider()
-
-# 計算ボタンと判定
-if st.button("🚀 BCR-ABLへのドッキングシミュレーションを実行！", type="primary"):
-    with st.spinner("分子動力学計算およびAIによる結合エネルギー予測中..."):
-        time.sleep(1.2)
-        
+    # スコア計算と解説の動的切り替え
     score = 0
     
-    # スコア計算（イマチニブの正解：プラス、疎水性3または2、サイズ3）
-    if "プラス" in charge: score += 40
-    elif "中性" in charge: score += 15
-    
-    if philic == 3: score += 30
-    elif philic == 2: score += 25
-    else: score += 10
-    
-    if size == 3: score += 30
-    elif size > 3: score -= 10 # 立体障害による減点
-    else: score += 10
-    
-    score = max(0, min(100, score))
-    
-    st.header(f"📊 結合スコア: {score} / 100 点")
-    
-    if score >= 95:
-        st.balloons()
-        st.success("🎉 完璧です！あなたが設計した分子は、奇跡の分子標的薬『イマチニブ』そのものです！がん細胞の増殖シグナルを完全にブロックしました！")
-    elif score >= 70:
-        st.warning("👍 惜しい！かなり良い結合ですが、まだ少し隙間があるか、あるいはわずかに衝突しています。スライダーを微調整してみましょう！")
+    if "プラス" in charge:
+        score += 40
+        st.success("⭕ **電荷:** ポケット奥のマイナスアミノ酸（Asp381等）と、薬のプラス（アミノ基）が磁石のように強烈に引き合っています！（静電相互作用）")
+    elif "マイナス" in charge:
+        st.error("❌ **電荷:** マイナス同士が反発！磁石の同極のように薬が弾き飛ばされてしまいます。")
     else:
-        st.error("😭 結合エネルギーが足りません。右側の「現在の状態」のテキストを読みながら、マイナス電気との引き合い（静電相互作用）や、スレオニンの壁（立体障害）を意識して再設計してください。")
+        st.warning("🔺 **電荷:** 反発はしませんが、強い引き合いも生まれず、結合が弱いです。")
+        
+    if philic == 3:
+        score += 30
+        st.success("⭕ **疎水性:** ベンゼン環の油っぽさがポケットの疎水性領域（Leu, Ile）と完璧に密着し、水分子を追い出して安定しました。")
+    elif philic == 2:
+        score += 25
+        st.info("🔺 **疎水性:** イマチニブの標準骨格です。十分良好な結合です。")
+    else:
+        st.error("❌ **疎水性:** 油っぽさが足りず、周りの水分子に邪魔されてポケットから滑り落ちてしまいます。")
 
-    # データサイエンス＆化学の解説
-    st.markdown("""
-    ### 🔬 高校化学から学ぶ「イマチニブ」の凄さ（親子で答え合わせ）
-    実際の創薬において、この「BCR-ABL」というタンパク質の攻略は歴史的な大事件でした。
-    * **電荷の引き合い:** ポケットの奥にあるマイナスの電気に対し、薬の側に**「アミノ基（プラスに変電しやすい性質）」**をピンポイントで配置することで、強力にくっつくよう設計されています。
-    * **立体障害（サイズ）:** このポケットの入り口には「スレオニン315（Thr315）」というアミノ酸の壁（ゲートキーパー）があります。薬が大きすぎるとここにぶつかって弾かれます。実は、がん細胞がこのスレオニンをさらに大きなアミノ酸（イソロイシン）に変異させることで、薬が効かなくなる「耐性」を獲得することがデータサイエンスの解析で分かっています。
-    """)
+    if size == 3:
+        score += 30
+        st.success("⭕ **サイズ:** 完璧な長さです！入り口にあるゲートキーパー「スレオニン315（Thr315）」の壁をすり抜けて奥まで届いています。")
+    elif size > 3:
+        score -= 15
+        st.error("💥 **立体障害発生:** 分子が長すぎます！3Dモデルで黄色く光っている『Thr315』の壁に激突し、ポケットに入りません！")
+    else:
+        st.warning("🔺 **サイズ:** 短すぎます！奥のポケットまで手が届いていません。")
+
+    score = max(0, min(100, score))
+    st.metric(label="📊 予測される結合スコア", value=f"{score} / 100 点")
+
+with col2:
+    st.subheader("🔮 BCR-ABL ＆ イマチニブ 3D分子モデル")
+    st.caption("💻 マウス左ドラッグ：回転 / 右ドラッグ：移動 / ホイール：拡大縮小")
+    
+    # --- py3Dmolによる3Dモデル構築 ---
+    # PDBから実際のBCR-ABLとイマチニブの複合体構造(1IEP)を読み込む
+    view = py3Dmol.view(query='pdb:1IEP', width=600, height=500)
+    
+    # タンパク質全体を薄い灰色のリボン（漫画スタイル）で表示
+    view.setStyle({'protein': True}, {'cartoon': {'color': '#e0e0e0', 'opacity': 0.8}})
+    
+    # 薬（イマチニブ）をスティックモデルで目立たせて表示（元素ごとに色分け）
+    view.setStyle({'hetero': True}, {'stick': {'colorscheme': 'cyanCarbon', 'radius': 0.3}})
+    
+    # 超重要アミノ酸「スレオニン315 (Thr315)」をハイライト表示
+    # スライダーでサイズが「長すぎ(>3)」になったら、警告としてThr315を黄色く光らせる演出
+    if size > 3:
+        view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'yellowCarbon', 'radius': 0.4}})
+        view.addLabel("💥衝突注意: Thr315の壁", {'resi': 315}, {'backgroundColor': 'red', 'backgroundOpacity': 0.8})
+    else:
+        view.addStyle({'resi': 315}, {'stick': {'colorscheme': 'greenCarbon', 'radius': 0.3}})
+        view.addLabel("ゲートキーパー: Thr315", {'resi': 315}, {'backgroundColor': 'darkgreen', 'backgroundOpacity': 0.8})
+        
+    # 薬（STI: イマチニブのPDBコード）にもラベルをつける
+    view.addLabel("薬（イマチニブ類似体）", {'resn': 'STI'}, {'backgroundColor': 'navy', 'backgroundOpacity': 0.8})
+    
+    # 視点を結合ポケット周辺にクローズアップ（ここがポイント！）
+    view.zoomTo({'resn': 'STI'})
+    
+    # Streamlit画面に3Dモデルを表示
+    showmol(view, height=500, width=600)
+    
+    st.info("💡 **親子で観察しよう！** 中央の太い分子が「薬」で、それを取り囲む薄いリボンが「タンパク質（鍵穴）」です。緑色（または黄色）のアミノ酸の壁と、薬の距離感に注目してください！")
