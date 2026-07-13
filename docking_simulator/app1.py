@@ -62,7 +62,7 @@ jsme_html_code = """
 
         // JSMEエディタが読み込まれたら自動実行
         function jsmeOnLoad() {
-            jsmeApplet = new JSME.jsmeApplet("jsme_container", "100%", "340px", {
+            jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "340px", {
                 "options" : "query,nocanonical,paste"
             });
         }
