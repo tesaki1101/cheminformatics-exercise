@@ -1,5 +1,9 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import pandas as pd
+import pickle
+from rdkit import Chem
+from rdkit.Chem import Descriptors
 
 # ページ設定（モバイル・PC双方に最適化）
 st.set_page_config(
@@ -10,6 +14,51 @@ st.set_page_config(
 
 st.title("🧬 3D AI創薬シミュレータ")
 st.write("白血病の原因タンパク質「BCR-ABL」のポケットにぴったりハマる薬を分子エディタで設計しましょう！")
+
+
+# --- モデルの読み込み（アプリ起動時に1回だけ実行） ---
+@st.cache_resource
+def load_model():
+    with open("model.pkl", "rb") as f:
+        return pickle.load(f)
+
+
+model = load_model()
+FEATURE_NAMES = model.feature_name_  # 学習時と全く同じ順序・名前の特徴量リスト
+
+
+def calc_features(smiles: str):
+    """SMILES文字列からモデルが必要とする201個のRDKit記述子を、学習時と同じ順序で計算する"""
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    desc_dict = Descriptors.CalcMolDescriptors(mol)
+    row = {name: desc_dict.get(name) for name in FEATURE_NAMES}
+    return pd.DataFrame([row], columns=FEATURE_NAMES)
+
+
+def score_to_points(score: float) -> float:
+    """
+    ドッキングスコア(kcal/mol)を0〜100点に変換する。
+    score <= -14 -> 100点、score >= 4 -> 0点、その間は線形補間。
+    """
+    BEST, WORST = -14.0, 4.0
+    clipped = max(BEST, min(WORST, score))
+    points = (WORST - clipped) / (WORST - BEST) * 100
+    return points
+
+
+def score_comment(points: float):
+    """0〜100点の点数を教育向けのコメントに変換。"""
+    if points >= 90:
+        return "🎯", "非常に強い結合（特効薬レベル）", "success"
+    elif points >= 70:
+        return "⭕", "強い結合", "success"
+    elif points >= 50:
+        return "🔺", "中程度の結合", "warning"
+    else:
+        return "❌", "弱い結合（結合しにくい）", "error"
+
 
 st.subheader("🛠️ 1. 分子エディタ（JSME）で構造を描く")
 st.markdown("""
@@ -104,7 +153,7 @@ run = st.button("🚀 ドッキング解析を実行", type="primary")
 st.divider()
 
 # --- 3. ドッキング結果の出力エリア ---
-st.subheader("🔮 3. ドッキング結果")
+st.subheader("🔮 3. ドッキング結果（AIモデルによる予測）")
 
 if not run:
     st.info("💡 分子を描いてSMILESを取得・貼り付けたら、「ドッキング解析を実行」を押してください。")
@@ -112,79 +161,35 @@ elif not smiles_input.strip():
     st.warning("⚠️ SMILES文字列が入力されていません。エディタで構造を描いてから貼り付けてください。")
 else:
     current_structure = smiles_input.strip()
+    features = calc_features(current_structure)
 
-    # 【実習用判定ロジック】文字列の長さ・原子の種類から特徴を抽出
-    has_nitrogen = "N" in current_structure or "n" in current_structure
-    has_oxygen = "O" in current_structure or "o" in current_structure
-    mol_length = len(current_structure)
-
-    image_file = "perfect.png"
-    status_text = ""
-    score = 50  # ベーススコア
-
-    if mol_length > 45:  # 描きすぎて分子が長すぎる場合
-        score = 35
-        image_file = "too_long.png"
-        status_text = (
-            "💥 **ドッキング失敗（立体障害）**\n\n"
-            "分子のサイズが大きすぎ（長すぎ）ます！ポケット入り口にある**『Thr315』の壁**に"
-            "激突してしまい、奥の結合サイトへ侵入することができません。"
-        )
-    elif mol_length < 15:  # 短すぎる場合
-        score = 40
-        image_file = "too_short.png"
-        status_text = (
-            "🔺 **ドッキング不完全（長さ不足）**\n\n"
-            "分子の長さが足りません。入り口のThr315はすり抜けましたが、"
-            "ポケット最奥部にあるターゲット（Asp381）まで薬の手が届いていません。"
-        )
+    if features is None:
+        st.error("❌ このSMILES文字列は正しい化学構造として認識できませんでした。エディタで構造を描き直してみてください。")
     else:
-        # 長さがちょうど良い場合、原子の種類（電荷）で選別
-        if has_nitrogen and not has_oxygen:
-            score = 98
-            image_file = "perfect.png"
-            status_text = (
-                "🎯 **ドッキング大成功！ジャストフィット！**\n\n"
-                "完璧な分子設計です！配置した**窒素（N）原子**が体内でプラスの電荷を帯び、"
-                "ポケット最奥部にあるマイナス電荷（Asp381）と強力に引き合いました（静電相互作用）。"
-            )
-        elif has_oxygen:
-            score = 15
-            image_file = "repulsion.png"
-            status_text = (
-                "❌ **ドッキング失敗（電気的反発）**\n\n"
-                "**酸素（O）原子**（カルボキシ基など）を配置したため、分子の先端がマイナスに"
-                "帯電してしまいました。ポケット奥のマイナス電荷と磁石の同極のように激しく反発し、"
-                "弾き飛ばされています。"
-            )
+        score = float(model.predict(features)[0])
+        points = score_to_points(score)
+        icon, label, box_type = score_comment(points)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(label="📊 判定結果", value=f"{points:.0f} / 100 点")
+        with col2:
+            st.caption("💻 入力されたSMILES")
+            st.code(current_structure, language="text")
+
+        message = f"{icon} **{label}**（{points:.0f}点）"
+        if box_type == "success":
+            st.success(message)
+        elif box_type == "warning":
+            st.warning(message)
         else:
-            score = 60
-            image_file = "perfect.png"
-            status_text = (
-                "🔺 **結合力不足（中性骨格）**\n\n"
-                "形はポケットに収まっていますが、炭素（C）主体の構造であるため電気的な引き合いが"
-                "発生しません。これでは結合が弱く、すぐにポケットから外れてしまいます。"
-                "先端に「あの原子」を組み込んでみましょう。"
-            )
+            st.error(message)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label="📊 予測結合スコア", value=f"{score} / 100 点")
-    with col2:
-        st.caption("💻 入力されたSMILES")
-        st.code(current_structure, language="text")
+        st.caption(f"※ AIが予測した結合の強さをもとに、0〜100点に変換したスコアです（参考：ドッキングスコア {score:.2f} kcal/mol）。")
 
-    st.markdown(status_text)
-
-    # 断面図画像（同じフォルダに perfect.png / too_long.png / too_short.png / repulsion.png を配置）
-    try:
-        st.image(
-            image_file,
-            caption=f"設計された化合物（{current_structure[:20]}）のドッキングシミュレーション",
-            width=350
-        )
-    except Exception:
-        st.caption(f"（断面図画像「{image_file}」が見つかりません。app.pyと同じフォルダに配置してください）")
+        with st.expander("🔬 AIが見ている分子の特徴量（一部）"):
+            preview_cols = ["MolWt", "MolLogP", "TPSA", "NumHDonors", "NumHAcceptors", "NumRotatableBonds"]
+            st.dataframe(features[preview_cols].T.rename(columns={0: "値"}))
 
 st.sidebar.markdown("""
 ### 💡 使い方
@@ -193,5 +198,9 @@ st.sidebar.markdown("""
 3. 下の入力欄にペースト
 4. 「ドッキング解析を実行」を押す
 
-※ このスコアは実習用の簡易判定であり、実際のAI創薬計算とは異なります。
+### 🧬 このアプリについて
+表示される点数は、RDKitで計算した201種類の分子記述子（分子量・LogP・極性表面積など）をもとに、
+実際のドッキング計算結果から学習したLightGBMモデルが予測した**ドッキングスコア（kcal/mol）**を、
+分かりやすい0〜100点に変換したものです（-14 kcal/mol以下→100点、4 kcal/mol以上→0点）。
+点数が高いほど、標的タンパク質と強く結合すると予測されます。
 """)
