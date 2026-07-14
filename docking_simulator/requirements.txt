@@ -1,4 +1,5 @@
 streamlit
-py3Dmol
 rdkit
-pickle
+lightgbm
+pandas
+scikit-learn
