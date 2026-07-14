@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import pickle
+import os
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
@@ -19,7 +20,8 @@ st.write("白血病の原因タンパク質「BCR-ABL」のポケットにぴっ
 # --- モデルの読み込み（アプリ起動時に1回だけ実行） ---
 @st.cache_resource
 def load_model():
-    with open("model.pkl", "rb") as f:
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model.pkl")
+    with open(model_path, "rb") as f:
         return pickle.load(f)
 
 
