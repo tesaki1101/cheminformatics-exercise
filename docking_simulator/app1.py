@@ -16,6 +16,30 @@ st.set_page_config(
 st.title("🧬 3D AI創薬シミュレータ")
 st.write("白血病の原因タンパク質「BCR-ABL」のポケットにぴったりハマる薬を分子エディタで設計しましょう！")
 
+IMATINIB_SMILES = "Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1"
+
+# 生徒に伝わりやすい特徴量だけを厳選し、「増やす／減らす」提案文を対応づける
+# 形式: 特徴量名 -> (表示名, 値を増やす提案, 値を減らす提案)
+FEATURE_HINTS = {
+    "MolWt": ("分子の大きさ（分子量）", "鎖を伸ばしたり環を追加したりして、分子を少し大きくしてみましょう", "不要な部分を削って、分子を少しコンパクトにしてみましょう"),
+    "MolLogP": ("油になじみやすさ（LogP）", "炭素鎖やベンゼン環を増やして、油になじみやすい部分を増やしてみましょう", "OHやNH2などを増やして、水になじみやすい部分を増やしてみましょう"),
+    "TPSA": ("極性表面積（TPSA）", "OH・NH・C=Oなどの極性基を追加してみましょう", "極性基を減らし、炭素骨格を増やしてみましょう"),
+    "NumHDonors": ("水素結合ドナー（OH・NHの数）", "OHやNH基を追加してみましょう", "OHやNH基を減らしてみましょう"),
+    "NumHAcceptors": ("水素結合アクセプター（N・Oの数）", "窒素や酸素を含む基を追加してみましょう", "窒素や酸素を含む基を減らしてみましょう"),
+    "NumAromaticRings": ("芳香環の数", "ベンゼン環などの芳香環を追加してみましょう", "芳香環を減らしてみましょう"),
+    "NumAromaticCarbocycles": ("ベンゼン環のような炭素だけの芳香環の数", "ベンゼン環を追加してみましょう", "ベンゼン環を減らしてみましょう"),
+    "NumAromaticHeterocycles": ("窒素などを含む芳香環（ピリジンなど）の数", "ピリジンのような複素芳香環を追加してみましょう", "複素芳香環を減らしてみましょう"),
+    "NumRotatableBonds": ("分子の柔らかさ（回転可能結合の数）", "鎖を伸ばして柔軟性を増やしてみましょう", "環構造を増やして分子を固くしてみましょう"),
+    "RingCount": ("環構造の数", "環を追加してみましょう", "環を減らしてみましょう"),
+    "FractionCSP3": ("枝分かれの度合い（sp3炭素の割合）", "枝分かれした構造を増やしてみましょう", "平面的な構造（芳香環など）を増やしてみましょう"),
+    "fr_COO": ("カルボン酸（酸性）基の数", "カルボン酸基（-COOH）を追加してみましょう", "カルボン酸基を減らしてみましょう"),
+    "fr_amide": ("アミド結合の数", "アミド結合（-C(=O)NH-）を追加してみましょう", "アミド結合を減らしてみましょう"),
+    "fr_pyridine": ("ピリジン環の数", "ピリジン環を追加してみましょう", "ピリジン環を減らしてみましょう"),
+    "fr_piperzine": ("ピペラジン環の数", "ピペラジン環を追加してみましょう", "ピペラジン環を減らしてみましょう"),
+    "fr_ether": ("エーテル結合の数", "エーテル結合（-O-）を追加してみましょう", "エーテル結合を減らしてみましょう"),
+    "NumHeteroatoms": ("ヘテロ原子（N・O・Sなど）の数", "窒素や酸素などを含む部分を増やしてみましょう", "炭素・水素だけの部分を増やしてみましょう"),
+}
+
 
 # --- モデルの読み込み（アプリ起動時に1回だけ実行） ---
 @st.cache_resource
@@ -29,14 +53,18 @@ model = load_model()
 FEATURE_NAMES = model.feature_name_  # 学習時と全く同じ順序・名前の特徴量リスト
 
 
-def calc_features(smiles: str):
-    """SMILES文字列からモデルが必要とする201個のRDKit記述子を、学習時と同じ順序で計算する"""
+def calc_feature_dict(smiles: str):
+    """SMILES文字列からモデルが必要とする201個のRDKit記述子を辞書で計算する"""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return None
     desc_dict = Descriptors.CalcMolDescriptors(mol)
-    row = {name: desc_dict.get(name) for name in FEATURE_NAMES}
-    return pd.DataFrame([row], columns=FEATURE_NAMES)
+    return {name: desc_dict.get(name) for name in FEATURE_NAMES}
+
+
+def predict_score(feature_dict: dict) -> float:
+    row = pd.DataFrame([feature_dict], columns=FEATURE_NAMES)
+    return float(model.predict(row)[0])
 
 
 def score_to_points(score: float) -> float:
@@ -62,6 +90,49 @@ def score_comment(points: float):
         return "❌", "弱い結合（結合しにくい）", "error"
 
 
+@st.cache_data
+def get_imatinib_reference():
+    """目標分子（内部参照用、画面には表示しない）の特徴量・スコアを1回だけ計算してキャッシュする"""
+    feats = calc_feature_dict(IMATINIB_SMILES)
+    score = predict_score(feats)
+    return feats, score
+
+
+def get_suggestions(current_dict: dict, top_n: int = 3):
+    """
+    現在の分子について、目標分子との比較に基づく改善提案を返す。
+    LightGBMのpred_contribで「今のスコアを悪くしている(正の寄与)」特徴量のうち、
+    生徒に説明しやすいものだけを取り出し、目標分子の値に近づける方向を提案する。
+    """
+    imat_feats, _ = get_imatinib_reference()
+
+    row = [current_dict[f] for f in FEATURE_NAMES]
+    contrib = model.booster_.predict([row], pred_contrib=True)[0][:-1]  # 最後はbias項なので除く
+    feat_contrib = list(zip(FEATURE_NAMES, contrib))
+
+    # 「結合を弱くしている(正の寄与)」かつ「生徒に説明しやすい」特徴量だけを候補にする
+    candidates = [(name, c) for name, c in feat_contrib if name in FEATURE_HINTS and c > 0]
+    candidates.sort(key=lambda x: -x[1])
+
+    suggestions = []
+    for name, _ in candidates:
+        label, inc_text, dec_text = FEATURE_HINTS[name]
+        cur_val = current_dict[name]
+        target_val = imat_feats[name]
+        if cur_val is None or target_val is None or abs(cur_val - target_val) < 1e-6:
+            continue
+        text = inc_text if cur_val < target_val else dec_text
+        suggestions.append({
+            "label": label,
+            "text": text,
+            "current": cur_val,
+            "target": target_val,
+        })
+        if len(suggestions) >= top_n:
+            break
+    return suggestions
+
+
 st.subheader("🛠️ 1. 分子エディタで構造を描く")
 st.markdown("""
 右側のツール（炭素・窒素・酸素やベンゼン環など）を選んで、中央のキャンバスに構造を描いてください。
@@ -79,12 +150,12 @@ st.subheader("🔮 2. ドッキング結果（AIモデルによる予測）")
 if not current_structure:
     st.info("💡 上のエディタで分子を描くと、ここに結果が表示されます。")
 else:
-    features = calc_features(current_structure)
+    features = calc_feature_dict(current_structure)
 
     if features is None:
         st.error("❌ このSMILES文字列は正しい化学構造として認識できませんでした。エディタで構造を描き直してみてください。")
     else:
-        score = float(model.predict(features)[0])
+        score = predict_score(features)
         points = score_to_points(score)
         icon, label, box_type = score_comment(points)
 
@@ -105,18 +176,37 @@ else:
 
         st.caption(f"※ AIが予測した結合の強さをもとに、0〜100点に変換したスコアです（参考：ドッキングスコア {score:.2f} kcal/mol）。")
 
+        # --- 3. 改善のヒント ---
+        st.divider()
+        st.subheader("💡 3. 得点アップのヒント")
+
+        if points >= 90:
+            st.success("すでにとても良い設計です！これ以上の改良も試してみましょう。")
+        else:
+            suggestions = get_suggestions(features, top_n=3)
+            if not suggestions:
+                st.info("すでに良いバランスの分子になっています。細部を色々変えて試してみましょう。")
+            else:
+                for i, s in enumerate(suggestions, start=1):
+                    st.markdown(f"{i}. {s['text']}")
+
         with st.expander("🔬 AIが見ている分子の特徴量（一部）"):
             preview_cols = ["MolWt", "MolLogP", "TPSA", "NumHDonors", "NumHAcceptors", "NumRotatableBonds"]
-            st.dataframe(features[preview_cols].T.rename(columns={0: "値"}))
+            row_df = pd.DataFrame([features], columns=FEATURE_NAMES)
+            st.dataframe(row_df[preview_cols].T.rename(columns={0: "値"}))
 
 st.sidebar.markdown("""
 ### 💡 使い方
 1. 上のエディタで分子を描く
 2. すぐに結果が自動的に表示される
+3. 「得点アップのヒント」を参考に構造を改良する
 
 ### 🧬 このアプリについて
 表示される点数は、RDKitで計算した201種類の分子記述子（分子量・LogP・極性表面積など）をもとに、
 実際のドッキング計算結果から学習したLightGBMモデルが予測した**ドッキングスコア（kcal/mol）**を、
 分かりやすい0〜100点に変換したものです（-14 kcal/mol以下→100点、4 kcal/mol以上→0点）。
 点数が高いほど、標的タンパク質と強く結合すると予測されます。
+
+改善のヒントは、実際によく効く医薬品分子の特徴と比較し、
+AIモデルが特に重視している要素を優先的に提案しています。
 """)
