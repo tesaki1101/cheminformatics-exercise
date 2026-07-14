@@ -3,3 +3,4 @@ rdkit
 lightgbm
 pandas
 scikit-learn
+streamlit-ketcher
