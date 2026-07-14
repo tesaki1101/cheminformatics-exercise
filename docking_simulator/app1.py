@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import pickle
 import os
+import json
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
@@ -62,107 +63,111 @@ def score_comment(points: float):
         return "❌", "弱い結合（結合しにくい）", "error"
 
 
+# --- URLのクエリパラメータから、直前にエディタで送信されたSMILESを取得 ---
+# （「解析する」ボタンを押すとページがこのパラメータ付きで再読み込みされる仕組み）
+query_smiles = st.query_params.get("smiles", "")
+
 st.subheader("🛠️ 1. 分子エディタ（JSME）で構造を描く")
 st.markdown("""
 右側のツール（炭素 C、窒素 N、酸素 O やベンゼン環など）を選んで、中央のキャンバスに構造を描いてください。
-描き終わったら、エディタ内の **「SMILESを取得」** ボタン → **「コピー」** ボタンを押し、下の入力欄に貼り付けてください。
+描き終わったら、エディタ内の **「この構造で解析する」** ボタンを押すと、下の解析結果が自動的に更新されます。
 """)
 
-# --- JSME埋め込み（表示専用。値はコピー＆ペーストでStreamlit側に渡す） ---
-jsme_html_code = """
+# --- JSME埋め込み ---
+# 値をStreamlitへ直接返すことはできないため、
+# 「解析する」ボタンを押すとページ自身をURLパラメータ付きで再読み込みし、
+# Python側がst.query_params経由でSMILESを受け取る仕組みにしている。
+jsme_html_code = f"""
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <script type="text/javascript" src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
     <style>
-        body { margin: 0; padding: 0; background-color: transparent; font-family: sans-serif; }
-        #jsme_container { width: 100%; height: 340px; }
-        #controls { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-        #smiles_box {
-            flex: 1;
-            min-width: 150px;
-            padding: 6px 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-family: monospace;
-        }
-        button {
-            padding: 6px 12px;
+        body {{ margin: 0; padding: 0; background-color: transparent; font-family: sans-serif; }}
+        #jsme_container {{ width: 100%; height: 340px; }}
+        #controls {{ margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }}
+        button {{
+            padding: 8px 16px;
             border: none;
             border-radius: 4px;
             background-color: #ff4b4b;
             color: white;
+            font-size: 1em;
             cursor: pointer;
-        }
-        button:hover { background-color: #e03e3e; }
-        #copy_msg { color: green; font-size: 0.85em; }
+        }}
+        button:hover {{ background-color: #e03e3e; }}
+        #status_msg {{ color: #666; font-size: 0.85em; }}
     </style>
 </head>
 <body>
     <div id="jsme_container"></div>
     <div id="controls">
-        <button onclick="extractSmiles()">SMILESを取得</button>
-        <input id="smiles_box" type="text" readonly placeholder="ここにSMILESが表示されます">
-        <button onclick="copySmiles()">コピー</button>
-        <span id="copy_msg"></span>
+        <button onclick="submitSmiles()">🚀 この構造で解析する</button>
+        <span id="status_msg"></span>
     </div>
 
     <script>
         var jsmeApplet;
+        var initialSmiles = {json.dumps(query_smiles)};
 
         // JSMEエディタが読み込まれたら自動実行
-        function jsmeOnLoad() {
-            jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "340px", {
+        function jsmeOnLoad() {{
+            jsmeApplet = new JSApplet.JSME("jsme_container", "100%", "340px", {{
                 "options" : "query,nocanonical,paste"
-            });
-        }
+            }});
+            // 前回解析した構造があれば、そのまま再表示する
+            if (initialSmiles) {{
+                try {{
+                    jsmeApplet.readGenericMolecularInput(initialSmiles);
+                }} catch (e) {{ /* 復元に失敗しても無視 */ }}
+            }}
+        }}
 
-        function extractSmiles() {
+        function submitSmiles() {{
             var smiles = jsmeApplet.smiles();
-            document.getElementById("smiles_box").value = smiles;
-            document.getElementById("copy_msg").innerText = "";
-        }
-
-        function copySmiles() {
-            var box = document.getElementById("smiles_box");
-            if (!box.value) {
-                extractSmiles();
-            }
-            box.select();
-            navigator.clipboard.writeText(box.value).then(function() {
-                document.getElementById("copy_msg").innerText = "コピーしました！";
-            });
-        }
+            if (!smiles) {{
+                document.getElementById("status_msg").innerText = "先に構造を描いてください";
+                return;
+            }}
+            document.getElementById("status_msg").innerText = "解析中...";
+            var url = window.top.location.origin + window.top.location.pathname
+                       + "?smiles=" + encodeURIComponent(smiles);
+            window.top.location.href = url;
+        }}
     </script>
 </body>
 </html>
 """
 
-components.html(jsme_html_code, height=420, scrolling=False)
+components.html(jsme_html_code, height=400, scrolling=False)
 
 st.divider()
 
-# --- 2. コピーしたSMILESを貼り付ける欄 ---
-st.subheader("📋 2. SMILESを貼り付けて解析")
-smiles_input = st.text_input(
-    "コピーしたSMILES文字列をここに貼り付けてください",
-    placeholder="例）c1ccccc1N"
-)
+# --- 手動でSMILESを試したい場合の入力欄（任意） ---
+with st.expander("✏️ SMILES文字列を直接入力して試す（上級者向け）"):
+    manual_smiles = st.text_input(
+        "SMILESを直接入力",
+        placeholder="例）c1ccccc1N"
+    )
+    manual_run = st.button("この文字列で解析する")
 
-run = st.button("🚀 ドッキング解析を実行", type="primary")
-
-st.divider()
-
-# --- 3. ドッキング結果の出力エリア ---
-st.subheader("🔮 3. ドッキング結果（AIモデルによる予測）")
-
-if not run:
-    st.info("💡 分子を描いてSMILESを取得・貼り付けたら、「ドッキング解析を実行」を押してください。")
-elif not smiles_input.strip():
-    st.warning("⚠️ SMILES文字列が入力されていません。エディタで構造を描いてから貼り付けてください。")
+# --- どちらのSMILESを解析対象にするか決定 ---
+if manual_run and manual_smiles.strip():
+    current_structure = manual_smiles.strip()
+elif query_smiles:
+    current_structure = query_smiles.strip()
 else:
-    current_structure = smiles_input.strip()
+    current_structure = ""
+
+st.divider()
+
+# --- 2. ドッキング結果の出力エリア ---
+st.subheader("🔮 2. ドッキング結果（AIモデルによる予測）")
+
+if not current_structure:
+    st.info("💡 上のエディタで分子を描いて「この構造で解析する」を押すと、ここに結果が表示されます。")
+else:
     features = calc_features(current_structure)
 
     if features is None:
@@ -176,7 +181,7 @@ else:
         with col1:
             st.metric(label="📊 判定結果", value=f"{points:.0f} / 100 点")
         with col2:
-            st.caption("💻 入力されたSMILES")
+            st.caption("💻 解析されたSMILES")
             st.code(current_structure, language="text")
 
         message = f"{icon} **{label}**（{points:.0f}点）"
@@ -196,9 +201,8 @@ else:
 st.sidebar.markdown("""
 ### 💡 使い方
 1. 上のエディタで分子を描く
-2. 「SMILESを取得」→「コピー」
-3. 下の入力欄にペースト
-4. 「ドッキング解析を実行」を押す
+2. 「🚀 この構造で解析する」を押す
+3. ページが自動的に更新され、結果が表示される
 
 ### 🧬 このアプリについて
 表示される点数は、RDKitで計算した201種類の分子記述子（分子量・LogP・極性表面積など）をもとに、
