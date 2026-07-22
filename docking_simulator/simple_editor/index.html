@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin:0; padding:0; font-family: -apple-system, sans-serif; }
+  #toolbar { display:flex; flex-wrap: wrap; gap:6px; padding:8px; background:#f0f2f6; box-sizing:border-box; }
+  button {
+    padding: 9px 12px;
+    border: none;
+    border-radius: 6px;
+    background:#e6e6e6;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button.active { background:#ff4b4b; color:white; }
+  #reset_btn { background:#dddddd; }
+  #canvas_wrap { touch-action: none; }
+  svg { background: white; display:block; width:100%; touch-action: none; }
+  .atom-label { font-size: 15px; font-weight:bold; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
+  .atom-hit { fill: rgba(255,255,255,0.01); }
+  .atom-hit.hover-target { stroke:#2f6fed; stroke-width:3px; fill:rgba(47,111,237,0.15); }
+  .bond-line { stroke:#333; stroke-width:2px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button data-tool="atom-C" class="active">C</button>
+  <button data-tool="atom-N">N</button>
+  <button data-tool="atom-O">O</button>
+  <button data-tool="atom-H">H</button>
+  <button data-tool="bond-1">－ 単結合</button>
+  <button data-tool="bond-2">＝ 二重結合</button>
+  <button data-tool="ring">⬡ ベンゼン環</button>
+  <button data-tool="eraser">🧹 消す</button>
+  <button id="reset_btn">🔄 リセット</button>
+</div>
+<div id="canvas_wrap">
+  <svg id="canvas" viewBox="0 0 400 320" width="100%" height="320"></svg>
+</div>
+
+<script>
+/* ---------- Streamlitとの最小限の通信プロトコル ---------- */
+function sendValue(value) {
+  window.parent.postMessage({ type: "streamlit:setComponentValue", value: value, dataType: "json" }, "*");
+}
+function setFrameHeight() {
+  const h = document.body.scrollHeight;
+  window.parent.postMessage({ type: "streamlit:setFrameHeight", height: h }, "*");
+}
+window.parent.postMessage({ type: "streamlit:componentReady", apiVersion: 1 }, "*");
+
+/* ---------- 状態 ---------- */
+let atoms = [];   // {id, elem, x, y}
+let bonds = [];   // {id, a1, a2, order}
+let nextAtomId = 1;
+let nextBondId = 1;
+let currentTool = "atom-C";
+
+const svg = document.getElementById("canvas");
+const NS = "http://www.w3.org/2000/svg";
+
+function findAtom(id) { return atoms.find(a => a.id === id); }
+
+function addAtom(elem, x, y) {
+  const atom = { id: nextAtomId++, elem, x, y };
+  atoms.push(atom);
+  return atom;
+}
+
+function addBond(a1id, a2id, order) {
+  const existing = bonds.find(b => (b.a1 === a1id && b.a2 === a2id) || (b.a1 === a2id && b.a2 === a1id));
+  if (existing) { existing.order = order; return existing; }
+  const bond = { id: nextBondId++, a1: a1id, a2: a2id, order };
+  bonds.push(bond);
+  return bond;
+}
+
+function removeAtom(atomId) {
+  atoms = atoms.filter(a => a.id !== atomId);
+  bonds = bonds.filter(b => b.a1 !== atomId && b.a2 !== atomId);
+}
+
+function removeBond(bondId) {
+  bonds = bonds.filter(b => b.id !== bondId);
+}
+
+function addBenzeneRing(cx, cy) {
+  const R = 34;
+  const ringAtoms = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 2 + i * (Math.PI * 2 / 6);
+    const x = cx + R * Math.cos(angle);
+    const y = cy - R * Math.sin(angle);
+    ringAtoms.push(addAtom("C", x, y));
+  }
+  for (let i = 0; i < 6; i++) {
+    const order = (i % 2 === 0) ? 2 : 1;
+    addBond(ringAtoms[i].id, ringAtoms[(i + 1) % 6].id, order);
+  }
+}
+
+/* ---------- 描画 ---------- */
+function render() {
+  svg.innerHTML = "";
+  for (const b of bonds) {
+    const a1 = findAtom(b.a1), a2 = findAtom(b.a2);
+    if (!a1 || !a2) continue;
+    drawBondLines(a1, a2, b);
+  }
+  for (const a of atoms) drawAtom(a);
+  updateSmiles();
+  setTimeout(setFrameHeight, 0);
+}
+
+function drawBondLines(a1, a2, bond) {
+  const offsets = bond.order === 2 ? [-3, 3] : [0];
+  for (const off of offsets) {
+    const dx = a2.x - a1.x, dy = a2.y - a1.y;
+    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+    const px = -dy / len * off, py = dx / len * off;
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", a1.x + px);
+    line.setAttribute("y1", a1.y + py);
+    line.setAttribute("x2", a2.x + px);
+    line.setAttribute("y2", a2.y + py);
+    line.setAttribute("class", "bond-line");
+    svg.appendChild(line);
+  }
+}
+
+function elemColor(elem) {
+  switch (elem) {
+    case "N": return "#2f6fed";
+    case "O": return "#e0393e";
+    case "H": return "#888888";
+    default: return "#222222";
+  }
+}
+
+function drawAtom(atom) {
+  const circle = document.createElementNS(NS, "circle");
+  circle.setAttribute("cx", atom.x);
+  circle.setAttribute("cy", atom.y);
+  circle.setAttribute("r", 14);
+  circle.setAttribute("data-atom-id", atom.id);
+  circle.setAttribute("class", "atom-hit");
+  svg.appendChild(circle);
+
+  const text = document.createElementNS(NS, "text");
+  text.setAttribute("x", atom.x);
+  text.setAttribute("y", atom.y);
+  text.setAttribute("class", "atom-label");
+  text.textContent = atom.elem;
+  text.style.fill = elemColor(atom.elem);
+  svg.appendChild(text);
+}
+
+/* ---------- 座標変換・当たり判定ヘルパー ---------- */
+function svgCoords(evt) {
+  const rect = svg.getBoundingClientRect();
+  const viewBox = svg.viewBox.baseVal;
+  return {
+    x: (evt.clientX - rect.left) * (viewBox.width / rect.width),
+    y: (evt.clientY - rect.top) * (viewBox.height / rect.height),
+  };
+}
+
+function distance(p1, p2) {
+  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+}
+
+function findAtomAt(x, y, radius = 16, excludeId = null) {
+  for (const a of atoms) {
+    if (a.id === excludeId) continue;
+    if (distance(a, { x, y }) <= radius) return a;
+  }
+  return null;
+}
+
+function pointToSegmentDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t * dx, cy = y1 + t * dy;
+  return Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+}
+
+function findBondAt(x, y, tol = 10) {
+  for (const b of bonds) {
+    const a1 = findAtom(b.a1), a2 = findAtom(b.a2);
+    if (!a1 || !a2) continue;
+    if (pointToSegmentDist(x, y, a1.x, a1.y, a2.x, a2.y) <= tol) return b;
+  }
+  return null;
+}
+
+/* ---------- ドラッグで結合を描く ---------- */
+const MIN_DRAG_DIST = 8;
+let dragging = false;
+let dragStartAtom = null;
+let previewLine = null;
+
+function createPreviewLine(x1, y1, x2, y2) {
+  previewLine = document.createElementNS(NS, "line");
+  previewLine.setAttribute("x1", x1);
+  previewLine.setAttribute("y1", y1);
+  previewLine.setAttribute("x2", x2);
+  previewLine.setAttribute("y2", y2);
+  previewLine.setAttribute("stroke", "#ff4b4b");
+  previewLine.setAttribute("stroke-width", "2.5");
+  previewLine.setAttribute("stroke-dasharray", "5,4");
+  previewLine.setAttribute("pointer-events", "none");
+  svg.appendChild(previewLine);
+}
+
+function updatePreviewLine(x2, y2) {
+  if (previewLine) {
+    previewLine.setAttribute("x2", x2);
+    previewLine.setAttribute("y2", y2);
+  }
+}
+
+function removePreviewLine() {
+  if (previewLine && previewLine.parentNode) previewLine.remove();
+  previewLine = null;
+}
+
+function highlightAtomAt(x, y, excludeId) {
+  svg.querySelectorAll(".atom-hit").forEach(el => el.classList.remove("hover-target"));
+  const hover = findAtomAt(x, y, 16, excludeId);
+  if (hover) {
+    const el = svg.querySelector(`[data-atom-id="${hover.id}"]`);
+    if (el) el.classList.add("hover-target");
+  }
+  return hover;
+}
+
+/* ---------- ポインター操作 ---------- */
+function onPointerDown(evt) {
+  const pos = svgCoords(evt);
+  const hitAtom = findAtomAt(pos.x, pos.y);
+
+  if (currentTool.startsWith("atom-")) {
+    const elem = currentTool.split("-")[1];
+    if (hitAtom) hitAtom.elem = elem;
+    else addAtom(elem, pos.x, pos.y);
+    render();
+    return;
+  }
+  if (currentTool === "ring") {
+    if (!hitAtom) addBenzeneRing(pos.x, pos.y);
+    render();
+    return;
+  }
+  if (currentTool === "eraser") {
+    if (hitAtom) { removeAtom(hitAtom.id); render(); return; }
+    const hitBond = findBondAt(pos.x, pos.y);
+    if (hitBond) { removeBond(hitBond.id); render(); }
+    return;
+  }
+  if (currentTool.startsWith("bond-")) {
+    evt.preventDefault();
+    svg.setPointerCapture(evt.pointerId);
+    dragStartAtom = hitAtom || addAtom("C", pos.x, pos.y);
+    dragging = true;
+    render();
+    createPreviewLine(dragStartAtom.x, dragStartAtom.y, pos.x, pos.y);
+  }
+}
+
+function onPointerMove(evt) {
+  if (!dragging) return;
+  evt.preventDefault();
+  const pos = svgCoords(evt);
+  updatePreviewLine(pos.x, pos.y);
+  highlightAtomAt(pos.x, pos.y, dragStartAtom.id);
+}
+
+function onPointerUp(evt) {
+  if (!dragging) return;
+  dragging = false;
+  const pos = svgCoords(evt);
+  removePreviewLine();
+
+  const order = parseInt(currentTool.split("-")[1], 10);
+  const hitAtom = findAtomAt(pos.x, pos.y, 16, dragStartAtom.id);
+  if (hitAtom) {
+    addBond(dragStartAtom.id, hitAtom.id, order);
+  } else if (distance(dragStartAtom, pos) > MIN_DRAG_DIST) {
+    const newAtom = addAtom("C", pos.x, pos.y);
+    addBond(dragStartAtom.id, newAtom.id, order);
+  }
+  dragStartAtom = null;
+  render();
+}
+
+svg.addEventListener("pointerdown", onPointerDown);
+svg.addEventListener("pointermove", onPointerMove);
+svg.addEventListener("pointerup", onPointerUp);
+svg.addEventListener("pointercancel", onPointerUp);
+
+/* ---------- ツールバー ---------- */
+document.querySelectorAll("#toolbar button[data-tool]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#toolbar button[data-tool]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentTool = btn.dataset.tool;
+    render();
+  });
+});
+document.getElementById("reset_btn").addEventListener("click", () => {
+  atoms = [];
+  bonds = [];
+  nextAtomId = 1;
+  nextBondId = 1;
+  render();
+});
+
+/* ---------- SMILES生成 ---------- */
+function buildAdjacency() {
+  const adj = {};
+  for (const a of atoms) adj[a.id] = [];
+  for (const b of bonds) {
+    adj[b.a1].push({ to: b.a2, order: b.order, edgeId: b.id });
+    adj[b.a2].push({ to: b.a1, order: b.order, edgeId: b.id });
+  }
+  return adj;
+}
+
+function computeSmiles() {
+  if (atoms.length === 0) return "";
+  const adj = buildAdjacency();
+  const visitedAtoms = new Set();
+  const processedEdges = new Set();
+  const treeChildren = {};
+  const ringDigitsOf = {};
+  let ringCounter = 1;
+
+  for (const a of atoms) treeChildren[a.id] = [];
+
+  function dfs(u, parentEdgeId) {
+    visitedAtoms.add(u);
+    for (const e of adj[u]) {
+      if (e.edgeId === parentEdgeId) continue;
+      if (processedEdges.has(e.edgeId)) continue;
+      processedEdges.add(e.edgeId);
+      if (!visitedAtoms.has(e.to)) {
+        treeChildren[u].push({ atomId: e.to, order: e.order });
+        dfs(e.to, e.edgeId);
+      } else {
+        const digit = ringCounter++;
+        (ringDigitsOf[u] = ringDigitsOf[u] || []).push({ digit, order: e.order });
+        (ringDigitsOf[e.to] = ringDigitsOf[e.to] || []).push({ digit, order: e.order });
+      }
+    }
+  }
+
+  function bondSymbol(order) { return order === 2 ? "=" : ""; }
+  function atomSymbol(elem) { return elem === "H" ? "[H]" : elem; }
+
+  function build(u) {
+    let s = atomSymbol(findAtom(u).elem);
+    for (const rc of (ringDigitsOf[u] || [])) {
+      s += bondSymbol(rc.order) + rc.digit;
+    }
+    const children = treeChildren[u];
+    children.forEach((c, idx) => {
+      const childStr = bondSymbol(c.order) + build(c.atomId);
+      if (idx < children.length - 1) s += "(" + childStr + ")";
+      else s += childStr;
+    });
+    return s;
+  }
+
+  const fragments = [];
+  for (const a of atoms) {
+    if (!visitedAtoms.has(a.id)) {
+      dfs(a.id, null);
+      fragments.push(build(a.id));
+    }
+  }
+  return fragments.join(".");
+}
+
+function updateSmiles() {
+  sendValue(computeSmiles());
+}
+
+render();
+</script>
+</body>
+</html>
