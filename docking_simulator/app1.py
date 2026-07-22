@@ -3,6 +3,8 @@ import streamlit.components.v1 as components
 import pandas as pd
 import pickle
 import os
+import time
+import random
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
@@ -146,69 +148,90 @@ st.subheader("🛠️ 1. 分子エディタで構造を描く")
 st.markdown("""
 「C・N・O・H」の原子ボタンと、「単結合・二重結合・ベンゼン環」のボタンだけのシンプルなエディタです。
 結合ボタンを選んだら、原子（または空いている場所）を押さえたままドラッグしてつなげてください。
+描き終わったら、下の「🚀 予測する」ボタンを押してください。
 """)
 
 # --- 分子エディタ（自作コンポーネント。ページ再読み込みなしでSMILESを直接取得） ---
 current_structure = st_simple_editor(height=380)
+
+st.write("")
+predict_clicked = st.button("🚀 予測する", type="primary", use_container_width=True)
 
 st.divider()
 
 # --- 2. ドッキング結果の出力エリア ---
 st.subheader("🔮 2. ドッキング結果（AIモデルによる予測）")
 
-if not current_structure:
-    st.info("💡 上のエディタで分子を描くと、ここに結果が表示されます。")
-else:
-    features = calc_feature_dict(current_structure)
-
-    if features is None:
-        st.error("❌ この構造は正しい化学構造として認識できませんでした。原子の結合数などを見直してみてください。")
+if predict_clicked:
+    if not current_structure:
+        st.warning("⚠️ まだ構造が描かれていません。エディタで分子を描いてから押してください。")
+        st.session_state.pop("last_result", None)
     else:
-        score = predict_score(features)
-        points = score_to_points(score)
-        icon, label, box_type = score_comment(points)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(label="📊 判定結果", value=f"{points:.0f} / 100 点")
-        with col2:
-            st.caption("💻 解析されたSMILES")
-            st.code(current_structure, language="text")
-
-        message = f"{icon} **{label}**（{points:.0f}点）"
-        if box_type == "success":
-            st.success(message)
-        elif box_type == "warning":
-            st.warning(message)
+        features = calc_feature_dict(current_structure)
+        if features is None:
+            st.session_state.pop("last_result", None)
+            st.error("❌ この構造は正しい化学構造として認識できませんでした。原子の結合数などを見直してみてください。")
         else:
-            st.error(message)
+            with st.spinner("🧪 AIがドッキング計算を実行中..."):
+                time.sleep(random.uniform(2.3, 3.7))  # 演出用のウェイト（毎回少しランダムに）
+            score = predict_score(features)
+            st.session_state["last_result"] = {
+                "structure": current_structure,
+                "features": features,
+                "score": score,
+            }
 
-        st.caption(f"※ AIが予測した結合の強さをもとに、0〜100点に変換したスコアです（参考：ドッキングスコア {score:.2f} kcal/mol）。")
+result = st.session_state.get("last_result")
 
-        # --- 3. 改善のヒント ---
-        st.divider()
-        st.subheader("💡 3. 得点アップのヒント")
+if result is None:
+    st.info("💡 上のエディタで分子を描いて「予測する」を押すと、ここに結果が表示されます。")
+else:
+    features = result["features"]
+    score = result["score"]
+    points = score_to_points(score)
+    icon, label, box_type = score_comment(points)
 
-        if points >= 90:
-            st.success("すでにとても良い設計です！これ以上の改良も試してみましょう。")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="📊 判定結果", value=f"{points:.0f} / 100 点")
+    with col2:
+        st.caption("💻 解析されたSMILES")
+        st.code(result["structure"], language="text")
+
+    message = f"{icon} **{label}**（{points:.0f}点）"
+    if box_type == "success":
+        st.success(message)
+    elif box_type == "warning":
+        st.warning(message)
+    else:
+        st.error(message)
+
+    st.caption(f"※ AIが予測した結合の強さをもとに、0〜100点に変換したスコアです（参考：ドッキングスコア {score:.2f} kcal/mol）。")
+
+    # --- 3. 改善のヒント ---
+    st.divider()
+    st.subheader("💡 3. 得点アップのヒント")
+
+    if points >= 90:
+        st.success("すでにとても良い設計です！これ以上の改良も試してみましょう。")
+    else:
+        suggestions = get_suggestions(features, top_n=3)
+        if not suggestions:
+            st.info("すでに良いバランスの分子になっています。細部を色々変えて試してみましょう。")
         else:
-            suggestions = get_suggestions(features, top_n=3)
-            if not suggestions:
-                st.info("すでに良いバランスの分子になっています。細部を色々変えて試してみましょう。")
-            else:
-                for i, s in enumerate(suggestions, start=1):
-                    st.markdown(f"{i}. {s['text']}")
+            for i, s in enumerate(suggestions, start=1):
+                st.markdown(f"{i}. {s['text']}")
 
-        with st.expander("🔬 AIが見ている分子の特徴量（一部）"):
-            preview_cols = ["MolWt", "MolLogP", "TPSA", "NumHDonors", "NumHAcceptors", "NumRotatableBonds"]
-            row_df = pd.DataFrame([features], columns=FEATURE_NAMES)
-            st.dataframe(row_df[preview_cols].T.rename(columns={0: "値"}))
+    with st.expander("🔬 AIが見ている分子の特徴量（一部）"):
+        preview_cols = ["MolWt", "MolLogP", "TPSA", "NumHDonors", "NumHAcceptors", "NumRotatableBonds"]
+        row_df = pd.DataFrame([features], columns=FEATURE_NAMES)
+        st.dataframe(row_df[preview_cols].T.rename(columns={0: "値"}))
 
 st.sidebar.markdown("""
 ### 💡 使い方
 1. ボタンで「原子の種類」または「結合の種類」を選ぶ
 2. キャンバスをタップ、または押さえたままドラッグして構造を描く
-3. すぐに結果が自動的に表示される
+3. 「🚀 予測する」ボタンを押す
 4. 「得点アップのヒント」を参考に構造を改良する
 
 ### 🧬 このアプリについて
