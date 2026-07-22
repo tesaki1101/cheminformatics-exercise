@@ -1,10 +1,10 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import pickle
 import os
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-from streamlit_ketcher import st_ketcher
 
 # ページ設定（モバイル・PC双方に最適化）
 st.set_page_config(
@@ -17,6 +17,15 @@ st.title("🧬 3D AI創薬シミュレータ")
 st.write("白血病の原因タンパク質「BCR-ABL」のポケットにぴったりハマる薬を分子エディタで設計しましょう！")
 
 IMATINIB_SMILES = "Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1"
+
+# --- 自作の超シンプルな分子エディタ（Streamlitカスタムコンポーネント） ---
+_COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simple_editor")
+_simple_editor_func = components.declare_component("simple_editor", path=_COMPONENT_DIR)
+
+
+def st_simple_editor(height: int = 380, key=None):
+    return _simple_editor_func(height=height, key=key, default="")
+
 
 # 生徒に伝わりやすい特徴量だけを厳選し、「増やす／減らす」提案文を対応づける
 # 形式: 特徴量名 -> (表示名, 値を増やす提案, 値を減らす提案)
@@ -135,12 +144,12 @@ def get_suggestions(current_dict: dict, top_n: int = 3):
 
 st.subheader("🛠️ 1. 分子エディタで構造を描く")
 st.markdown("""
-右側のツール（炭素・窒素・酸素やベンゼン環など）を選んで、中央のキャンバスに構造を描いてください。
-描くとすぐに下の結果が自動的に更新されます。
+「C・N・O・H」の原子ボタンと、「単結合・二重結合・ベンゼン環」のボタンだけのシンプルなエディタです。
+結合ボタンを選んだら、原子（または空いている場所）を押さえたままドラッグしてつなげてください。
 """)
 
-# --- 分子エディタ（公式コンポーネント。ページ再読み込みなしでSMILESを直接取得） ---
-current_structure = st_ketcher(value="", height=420)
+# --- 分子エディタ（自作コンポーネント。ページ再読み込みなしでSMILESを直接取得） ---
+current_structure = st_simple_editor(height=380)
 
 st.divider()
 
@@ -153,7 +162,7 @@ else:
     features = calc_feature_dict(current_structure)
 
     if features is None:
-        st.error("❌ このSMILES文字列は正しい化学構造として認識できませんでした。エディタで構造を描き直してみてください。")
+        st.error("❌ この構造は正しい化学構造として認識できませんでした。原子の結合数などを見直してみてください。")
     else:
         score = predict_score(features)
         points = score_to_points(score)
@@ -197,9 +206,10 @@ else:
 
 st.sidebar.markdown("""
 ### 💡 使い方
-1. 上のエディタで分子を描く
-2. すぐに結果が自動的に表示される
-3. 「得点アップのヒント」を参考に構造を改良する
+1. ボタンで「原子の種類」または「結合の種類」を選ぶ
+2. キャンバスをタップ、または押さえたままドラッグして構造を描く
+3. すぐに結果が自動的に表示される
+4. 「得点アップのヒント」を参考に構造を改良する
 
 ### 🧬 このアプリについて
 表示される点数は、RDKitで計算した201種類の分子記述子（分子量・LogP・極性表面積など）をもとに、
