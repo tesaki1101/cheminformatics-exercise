@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 st.title("🧬 3D AI創薬シミュレータ")
-st.write("白血病の原因タンパク質「BCR-ABL」のポケットにぴったりハマる薬を分子エディタで設計しましょう！")
+st.write("白血病の原因タンパク質"BCR-ABL"のポケットにぴったりハマる薬を設計しましょう！")
 
 IMATINIB_SMILES = "Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1"
 
@@ -146,8 +146,7 @@ def get_suggestions(current_dict: dict, top_n: int = 3):
 
 st.subheader("🛠️ 1. 分子エディタで構造を描く")
 st.markdown("""
-「C・N・O・H」の原子ボタンと、「単結合・二重結合・ベンゼン環」のボタンだけのシンプルなエディタです。
-結合ボタンを選んだら、原子（または空いている場所）を押さえたままドラッグしてつなげてください。
+結合ボタンを選んだら、原子を押さえたままドラッグしてつなげてください。
 描き終わったら、下の「🚀 予測する」ボタンを押してください。
 """)
 
