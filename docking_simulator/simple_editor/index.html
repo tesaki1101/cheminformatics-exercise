@@ -45,13 +45,13 @@
 <script>
 /* ---------- Streamlitとの最小限の通信プロトコル ---------- */
 function sendValue(value) {
-  window.parent.postMessage({ type: "streamlit:setComponentValue", value: value, dataType: "json" }, "*");
+  window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value, dataType: "json" }, "*");
 }
 function setFrameHeight() {
   const h = document.body.scrollHeight;
-  window.parent.postMessage({ type: "streamlit:setFrameHeight", height: h }, "*");
+  window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h }, "*");
 }
-window.parent.postMessage({ type: "streamlit:componentReady", apiVersion: 1 }, "*");
+window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
 
 /* ---------- 状態 ---------- */
 let atoms = [];   // {id, elem, x, y}
