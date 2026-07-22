@@ -73,7 +73,15 @@ function addAtom(elem, x, y) {
 
 function addBond(a1id, a2id, order) {
   const existing = bonds.find(b => (b.a1 === a1id && b.a2 === a2id) || (b.a1 === a2id && b.a2 === a1id));
-  if (existing) { existing.order = order; return existing; }
+  if (existing) {
+    if (existing.order === order) {
+      // 同じ結合ツールで既存の結合を再度なぞると、次数を切り替える(単結合⇄二重結合)
+      existing.order = (existing.order === 1) ? 2 : 1;
+    } else {
+      existing.order = order;
+    }
+    return existing;
+  }
   const bond = { id: nextBondId++, a1: a1id, a2: a2id, order };
   bonds.push(bond);
   return bond;
@@ -88,13 +96,18 @@ function removeBond(bondId) {
   bonds = bonds.filter(b => b.id !== bondId);
 }
 
-function addBenzeneRing(cx, cy) {
-  const R = 34;
+const RING_RADIUS = 34;
+
+function addBenzeneRing(cx, cy, attachAtom = null) {
   const ringAtoms = [];
   for (let i = 0; i < 6; i++) {
     const angle = Math.PI / 2 + i * (Math.PI * 2 / 6);
-    const x = cx + R * Math.cos(angle);
-    const y = cy - R * Math.sin(angle);
+    if (i === 0 && attachAtom) {
+      ringAtoms.push(attachAtom);
+      continue;
+    }
+    const x = cx + RING_RADIUS * Math.cos(angle);
+    const y = cy - RING_RADIUS * Math.sin(angle);
     ringAtoms.push(addAtom("C", x, y));
   }
   for (let i = 0; i < 6; i++) {
@@ -253,7 +266,12 @@ function onPointerDown(evt) {
     return;
   }
   if (currentTool === "ring") {
-    if (!hitAtom) addBenzeneRing(pos.x, pos.y);
+    if (!hitAtom) {
+      addBenzeneRing(pos.x, pos.y, null);
+    } else if (hitAtom.elem === "C") {
+      // クリックしたC原子をベンゼン環の1頂点として、環を接続する
+      addBenzeneRing(hitAtom.x, hitAtom.y + RING_RADIUS, hitAtom);
+    }
     render();
     return;
   }
