@@ -15,7 +15,7 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("🧬 滋賀大OC AI創薬シミュレータ")
+st.title("🧬 滋賀大OC AI創薬シミュレーター")
 st.write('白血病の原因タンパク質"BCR-ABL"のポケットにぴったりハマる薬を設計しましょう！')
 
 IMATINIB_SMILES = "Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1"
