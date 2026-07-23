@@ -17,10 +17,21 @@
     touch-action: manipulation;
   }
   button.active { background:#ff4b4b; color:white; }
-  #reset_btn, #undo_btn { background:#dddddd; }
+  #reset_btn, #undo_btn, #align_btn { background:#dddddd; }
   #canvas_wrap { touch-action: none; }
   svg { background: white; display:block; width:100%; touch-action: none; }
-  .atom-label { font-size: 15px; font-weight:bold; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
+  .atom-label {
+    font-family: Arial, Helvetica, "Helvetica Neue", sans-serif;
+    font-size: 19px;
+    font-weight: 700;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    paint-order: stroke fill;
+    stroke: #ffffff;
+    stroke-width: 4px;
+    stroke-linejoin: round;
+  }
   .atom-hit { fill: rgba(255,255,255,0.01); }
   .atom-hit.hover-target { stroke:#2f6fed; stroke-width:3px; fill:rgba(47,111,237,0.15); }
   .bond-line { stroke:#333; stroke-width:2px; }
@@ -31,7 +42,6 @@
   <button data-tool="atom-C" class="active">C</button>
   <button data-tool="atom-N">N</button>
   <button data-tool="atom-O">O</button>
-  <button data-tool="atom-H">H</button>
   <button data-tool="bond-1">－ 単結合</button>
   <button data-tool="bond-2">＝ 二重結合</button>
   <button data-tool="ring">⬡ ベンゼン環</button>
@@ -61,6 +71,7 @@ let nextAtomId = 1;
 let nextBondId = 1;
 let currentTool = "atom-C";
 let historyStack = [];
+let ringGroups = [];  // ベンゼン環として作られた原子ID配列のリスト(整列時に正六角形へ戻すために使う)
 
 const svg = document.getElementById("canvas");
 const NS = "http://www.w3.org/2000/svg";
@@ -92,6 +103,9 @@ function addBond(a1id, a2id, order) {
 function removeAtom(atomId) {
   atoms = atoms.filter(a => a.id !== atomId);
   bonds = bonds.filter(b => b.a1 !== atomId && b.a2 !== atomId);
+  ringGroups = ringGroups
+    .map(g => g.filter(id => id !== atomId))
+    .filter(g => g.length >= 3);
 }
 
 function removeBond(bondId) {
@@ -100,7 +114,7 @@ function removeBond(bondId) {
 
 /* ---------- 一つ戻る(アンドゥ) ---------- */
 function snapshot() {
-  return JSON.parse(JSON.stringify({ atoms, bonds, nextAtomId, nextBondId }));
+  return JSON.parse(JSON.stringify({ atoms, bonds, nextAtomId, nextBondId, ringGroups }));
 }
 
 function pushHistory() {
@@ -118,15 +132,233 @@ function undo() {
   bonds = prev.bonds;
   nextAtomId = prev.nextAtomId;
   nextBondId = prev.nextBondId;
+  ringGroups = prev.ringGroups || [];
+  render();
+}
+
+/* ---------- 整列(構造をきれいに並べ直す) ---------- */
+function angleBetween(fromPt, toPt) {
+  return Math.atan2(-(toPt.y - fromPt.y), toPt.x - fromPt.x);
+}
+
+function pointFromAngle(origin, angle, dist) {
+  return { x: origin.x + dist * Math.cos(angle), y: origin.y - dist * Math.sin(angle) };
+}
+
+function ringCenterOf(ids) {
+  let cx = 0, cy = 0, n = 0;
+  for (const id of ids) {
+    const a = findAtom(id);
+    if (!a) continue;
+    cx += a.x; cy += a.y; n++;
+  }
+  return n ? { x: cx / n, y: cy / n } : { x: 0, y: 0 };
+}
+
+function layoutRingAsPolygon(ids, bondLen) {
+  const valid = ids.filter(id => findAtom(id));
+  if (valid.length < 3) return;
+  const center = ringCenterOf(valid);
+  const n = valid.length;
+  const R = bondLen / (2 * Math.sin(Math.PI / n));
+  for (let i = 0; i < n; i++) {
+    const angle = Math.PI / 2 + i * (Math.PI * 2 / n);
+    const a = findAtom(valid[i]);
+    a.x = center.x + R * Math.cos(angle);
+    a.y = center.y - R * Math.sin(angle);
+  }
+}
+
+// 鎖(木構造の部分)を、ジグザグ・枝分かれは扇状に配置する
+function placeChainFrom(atomId, incomingAngle, turnSign, placed, adj, bondLen) {
+  const neighbors = (adj[atomId] || []).filter(n => !placed.has(n.to));
+  const count = neighbors.length;
+  if (count === 0) return;
+
+  neighbors.forEach((nb, idx) => {
+    let angle, nextTurnSign;
+    if (count === 1) {
+      // 直鎖: 60度ずつ左右交互に折り返してジグザグにする
+      angle = incomingAngle + turnSign * (60 * Math.PI / 180);
+      nextTurnSign = -turnSign;
+    } else {
+      // 分岐点: 来た方向の逆側を中心に扇状に広げる
+      const spread = 70 * Math.PI / 180;
+      const center = incomingAngle + Math.PI;
+      angle = center + (idx - (count - 1) / 2) * spread;
+      nextTurnSign = (idx % 2 === 0) ? 1 : -1;
+    }
+    const from = findAtom(atomId);
+    const to = findAtom(nb.to);
+    const pos = pointFromAngle(from, angle, bondLen);
+    to.x = pos.x; to.y = pos.y;
+    placed.add(nb.to);
+    placeChainFrom(nb.to, angle, nextTurnSign, placed, adj, bondLen);
+  });
+}
+
+function fitAndCenter() {
+  if (atoms.length === 0) return;
+  const viewBox = svg.viewBox.baseVal;
+  const margin = 30;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const a of atoms) {
+    minX = Math.min(minX, a.x); maxX = Math.max(maxX, a.x);
+    minY = Math.min(minY, a.y); maxY = Math.max(maxY, a.y);
+  }
+  const width = Math.max(maxX - minX, 1);
+  const height = Math.max(maxY - minY, 1);
+  const availW = viewBox.width - margin * 2;
+  const availH = viewBox.height - margin * 2;
+  // 画面より大きい場合だけ縮小する(小さい構造を無理に拡大はしない)
+  const scale = Math.min(1, availW / width, availH / height);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const targetCx = viewBox.width / 2, targetCy = viewBox.height / 2;
+  for (const a of atoms) {
+    a.x = targetCx + (a.x - cx) * scale;
+    a.y = targetCy + (a.y - cy) * scale;
+  }
+}
+
+function findConnectedComponents() {
+  const adj = buildAdjacency();
+  const visited = new Set();
+  const components = [];
+  for (const a of atoms) {
+    if (visited.has(a.id)) continue;
+    const comp = [];
+    const stack = [a.id];
+    visited.add(a.id);
+    while (stack.length) {
+      const cur = stack.pop();
+      comp.push(cur);
+      for (const nb of (adj[cur] || [])) {
+        if (!visited.has(nb.to)) { visited.add(nb.to); stack.push(nb.to); }
+      }
+    }
+    components.push(comp);
+  }
+  return components;
+}
+
+function boundingBoxOf(ids) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const id of ids) {
+    const a = findAtom(id);
+    if (!a) continue;
+    minX = Math.min(minX, a.x); maxX = Math.max(maxX, a.x);
+    minY = Math.min(minY, a.y); maxY = Math.max(maxY, a.y);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+// つながっていない別々の構造(成分)同士が重ならないよう、横に並べ直す
+function arrangeComponentsSideBySide(bondLen) {
+  const components = findConnectedComponents();
+  if (components.length <= 1) return;
+  const GAP = bondLen * 1.5;
+  let cursorX = 0;
+  for (const comp of components) {
+    const bb = boundingBoxOf(comp);
+    if (!isFinite(bb.minX)) continue;
+    const width = bb.maxX - bb.minX;
+    const centerY = (bb.minY + bb.maxY) / 2;
+    const dx = cursorX - bb.minX;
+    for (const id of comp) {
+      const a = findAtom(id);
+      a.x += dx;
+      a.y -= centerY; // 高さの基準をいったん0に揃える
+    }
+    cursorX += width + GAP;
+  }
+}
+
+// 手動でドラッグしてできた「わっか」も含め、グラフ上の全てのサイクル(環)を検出する
+function detectCycles() {
+  const adj = buildAdjacency();
+  const visited = new Set();
+  const processedEdges = new Set();
+  const parent = {}; // atomId -> 親原子のid
+  const cycles = [];
+
+  function dfs(u) {
+    visited.add(u);
+    for (const e of (adj[u] || [])) {
+      if (processedEdges.has(e.edgeId)) continue;
+      if (!visited.has(e.to)) {
+        processedEdges.add(e.edgeId);
+        parent[e.to] = u;
+        dfs(e.to);
+      } else {
+        processedEdges.add(e.edgeId);
+        // バックエッジを発見: uからe.toまで親をたどってサイクルを復元する
+        const path = [u];
+        let cur = u;
+        while (cur !== e.to && Object.hasOwn(parent, cur)) {
+          cur = parent[cur];
+          path.push(cur);
+        }
+        if (cur === e.to) cycles.push(path);
+      }
+    }
+  }
+
+  for (const a of atoms) {
+    if (!visited.has(a.id)) dfs(a.id);
+  }
+  return cycles;
+}
+
+function alignStructure() {
+  if (atoms.length < 2) return;
+  pushHistory();
+
+  const BOND_LEN = 42;
+  const adj = buildAdjacency();
+  const placed = new Set();
+
+  // ベンゼン環ツールで作った環と、手動でできた環(サイクル)の両方をまとめて扱う
+  const detected = detectCycles();
+  const allRings = [...ringGroups, ...detected];
+
+  // 1. 環をきれいな正多角形に並べ直す
+  for (const group of allRings) {
+    layoutRingAsPolygon(group, BOND_LEN);
+  }
+  for (const group of allRings) {
+    for (const id of group) if (findAtom(id)) placed.add(id);
+  }
+
+  // 2. 環から生えている鎖を、外向きにジグザグで配置する
+  for (const group of allRings) {
+    const validIds = group.filter(id => findAtom(id));
+    const center = ringCenterOf(validIds);
+    for (const atomId of validIds) {
+      const atom = findAtom(atomId);
+      const outward = angleBetween(center, atom);
+      placeChainFrom(atomId, outward, 1, placed, adj, BOND_LEN);
+    }
+  }
+
+  // 3. 環を含まない独立した鎖成分を配置する
+  for (const a of atoms) {
+    if (!placed.has(a.id)) {
+      placed.add(a.id);
+      placeChainFrom(a.id, Math.PI / 2, 1, placed, adj, BOND_LEN);
+    }
+  }
+
+  arrangeComponentsSideBySide(BOND_LEN);
+  fitAndCenter();
   render();
 }
 
 const RING_RADIUS = 34;
 
-function addBenzeneRing(cx, cy, attachAtom = null) {
+function addBenzeneRing(cx, cy, attachAtom = null, startAngle = Math.PI / 2) {
   const ringAtoms = [];
   for (let i = 0; i < 6; i++) {
-    const angle = Math.PI / 2 + i * (Math.PI * 2 / 6);
+    const angle = startAngle + i * (Math.PI * 2 / 6);
     if (i === 0 && attachAtom) {
       ringAtoms.push(attachAtom);
       continue;
@@ -139,14 +371,19 @@ function addBenzeneRing(cx, cy, attachAtom = null) {
     const order = (i % 2 === 0) ? 2 : 1;
     addBond(ringAtoms[i].id, ringAtoms[(i + 1) % 6].id, order);
   }
+  ringGroups.push(ringAtoms.map(a => a.id));
 }
 
 /* ---------- 描画 ---------- */
 function render() {
   svg.innerHTML = "";
+  const defs = document.createElementNS(NS, "defs");
+  svg.appendChild(defs);
+
   for (const b of bonds) {
     const a1 = findAtom(b.a1), a2 = findAtom(b.a2);
     if (!a1 || !a2) continue;
+    ensureBondGradient(defs, b, a1, a2);
     drawBondLines(a1, a2, b);
   }
   for (const a of atoms) drawAtom(a);
@@ -154,8 +391,31 @@ function render() {
   setTimeout(setFrameHeight, 0);
 }
 
+// 結合の両端の原子の色(N=青,O=赤,それ以外=黒)を使ったグラデーションを用意する
+// これにより、N・O原子に近づく部分だけ自然にその色に色づく
+function ensureBondGradient(defs, bond, a1, a2) {
+  const grad = document.createElementNS(NS, "linearGradient");
+  grad.setAttribute("id", `bond-grad-${bond.id}`);
+  grad.setAttribute("gradientUnits", "userSpaceOnUse");
+  grad.setAttribute("x1", a1.x); grad.setAttribute("y1", a1.y);
+  grad.setAttribute("x2", a2.x); grad.setAttribute("y2", a2.y);
+
+  const stop1 = document.createElementNS(NS, "stop");
+  stop1.setAttribute("offset", "0%");
+  stop1.setAttribute("stop-color", elemColor(a1.elem));
+
+  const stop2 = document.createElementNS(NS, "stop");
+  stop2.setAttribute("offset", "100%");
+  stop2.setAttribute("stop-color", elemColor(a2.elem));
+
+  grad.appendChild(stop1);
+  grad.appendChild(stop2);
+  defs.appendChild(grad);
+}
+
 function drawBondLines(a1, a2, bond) {
   const offsets = bond.order === 2 ? [-3, 3] : [0];
+  const strokeColor = `url(#bond-grad-${bond.id})`;
   for (const off of offsets) {
     const dx = a2.x - a1.x, dy = a2.y - a1.y;
     const len = Math.sqrt(dx*dx + dy*dy) || 1;
@@ -166,6 +426,7 @@ function drawBondLines(a1, a2, bond) {
     line.setAttribute("x2", a2.x + px);
     line.setAttribute("y2", a2.y + py);
     line.setAttribute("class", "bond-line");
+    line.style.stroke = strokeColor;
     svg.appendChild(line);
   }
 }
@@ -179,6 +440,14 @@ function elemColor(elem) {
   }
 }
 
+function atomDegree(atomId) {
+  let count = 0;
+  for (const b of bonds) {
+    if (b.a1 === atomId || b.a2 === atomId) count++;
+  }
+  return count;
+}
+
 function drawAtom(atom) {
   const circle = document.createElementNS(NS, "circle");
   circle.setAttribute("cx", atom.x);
@@ -188,30 +457,37 @@ function drawAtom(atom) {
   circle.setAttribute("class", "atom-hit");
   svg.appendChild(circle);
 
-  const text = document.createElementNS(NS, "text");
-  text.setAttribute("x", atom.x);
-  text.setAttribute("y", atom.y);
-  text.setAttribute("class", "atom-label");
-  text.textContent = atom.elem;
-  text.style.fill = elemColor(atom.elem);
-  svg.appendChild(text);
+  // Cは末端(結合が1本以下)の原子だけラベルを表示する。鎖の途中やベンゼン環内のCは表示しない
+  const showLabel = atom.elem !== "C" || atomDegree(atom.id) <= 1;
+  if (showLabel) {
+    const text = document.createElementNS(NS, "text");
+    text.setAttribute("x", atom.x);
+    text.setAttribute("y", atom.y);
+    text.setAttribute("class", "atom-label");
+    text.textContent = atom.elem;
+    text.style.fill = elemColor(atom.elem);
+    svg.appendChild(text);
+  }
 }
 
 /* ---------- 座標変換・当たり判定ヘルパー ---------- */
 function svgCoords(evt) {
-  const rect = svg.getBoundingClientRect();
-  const viewBox = svg.viewBox.baseVal;
-  return {
-    x: (evt.clientX - rect.left) * (viewBox.width / rect.width),
-    y: (evt.clientY - rect.top) * (viewBox.height / rect.height),
-  };
+  // getBoundingClientRectでの手計算は、拡大縮小やタッチ環境でズレることがあるため、
+  // SVG標準の座標変換API(getScreenCTM)を使って、画面上のクリック位置を正確にSVG内部の座標に変換する
+  const point = svg.createSVGPoint();
+  point.x = evt.clientX;
+  point.y = evt.clientY;
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return { x: 0, y: 0 };
+  const transformed = point.matrixTransform(ctm.inverse());
+  return { x: transformed.x, y: transformed.y };
 }
 
 function distance(p1, p2) {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
 }
 
-function findAtomAt(x, y, radius = 16, excludeId = null) {
+function findAtomAt(x, y, radius = 20, excludeId = null) {
   for (const a of atoms) {
     if (a.id === excludeId) continue;
     if (distance(a, { x, y }) <= radius) return a;
@@ -237,11 +513,87 @@ function findBondAt(x, y, tol = 10) {
   return null;
 }
 
+function bondOrderSum(atomId) {
+  let sum = 0;
+  for (const b of bonds) {
+    if (b.a1 === atomId || b.a2 === atomId) sum += b.order;
+  }
+  return sum;
+}
+
 /* ---------- ドラッグで結合を描く ---------- */
 const MIN_DRAG_DIST = 8;
+const DRAW_BOND_LEN = 42;   // 新しく作る結合の長さ(常に一定にする)
+const SNAP_ANGLES_DEG = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330];
 let dragging = false;
 let dragStartAtom = null;
 let previewLine = null;
+
+function normalizeDeg(deg) {
+  return ((deg % 360) + 360) % 360;
+}
+
+function angleDiffDeg(a, b) {
+  let d = Math.abs(a - b) % 360;
+  if (d > 180) d = 360 - d;
+  return d;
+}
+
+// 原子から出ている既存の結合の角度(度)を一覧で返す
+function getExistingBondAnglesDeg(atomId) {
+  const adj = buildAdjacency();
+  const nbrs = adj[atomId] || [];
+  const atom = findAtom(atomId);
+  return nbrs.map(nb => {
+    const neighbor = findAtom(nb.to);
+    return normalizeDeg(angleBetween(atom, neighbor) * 180 / Math.PI);
+  });
+}
+
+// 原子の状態(すでに何本結合しているか)に応じて、次の結合の候補角度を決める
+// ・結合0本(最初の1本): 通常の30度刻み
+// ・結合1〜2本(2〜3本目になる): 既存の結合から±120度(いわゆる120度/240度)
+// ・結合3本(4本目=炭素が4つ全て埋まる): 90度刻み
+function computeSnapCandidatesDeg(atomId) {
+  const existing = getExistingBondAnglesDeg(atomId);
+  const n = existing.length;
+
+  if (n === 0) {
+    return SNAP_ANGLES_DEG.slice();
+  }
+
+  if (n === 3) {
+    const base = existing[0];
+    let candidates = [0, 90, 180, 270].map(o => normalizeDeg(base + o));
+    candidates = candidates.filter(c => existing.every(e => angleDiffDeg(c, e) > 15));
+    return candidates.length > 0 ? candidates : [normalizeDeg(base + 90)];
+  }
+
+  // n === 1 または 2
+  let candidates = [];
+  for (const e of existing) {
+    candidates.push(normalizeDeg(e + 120));
+    candidates.push(normalizeDeg(e - 120));
+  }
+  candidates = candidates.filter(c => existing.every(e => angleDiffDeg(c, e) > 15));
+  const uniq = [];
+  for (const c of candidates) {
+    if (!uniq.some(u => angleDiffDeg(u, c) < 5)) uniq.push(c);
+  }
+  return uniq.length > 0 ? uniq : SNAP_ANGLES_DEG.slice();
+}
+
+// ドラッグした角度を、その原子の状況に応じた「きれいな角度」に自動で合わせる
+function snapAngleForAtom(atomId, rawAngleRad) {
+  const candidatesDeg = computeSnapCandidatesDeg(atomId);
+  const rawDeg = normalizeDeg(rawAngleRad * 180 / Math.PI);
+  let best = candidatesDeg[0], bestDiff = 360;
+  for (const cand of candidatesDeg) {
+    const diff = angleDiffDeg(rawDeg, cand);
+    if (diff < bestDiff) { bestDiff = diff; best = cand; }
+  }
+  return best * Math.PI / 180;
+}
 
 function createPreviewLine(x1, y1, x2, y2) {
   previewLine = document.createElementNS(NS, "line");
@@ -292,13 +644,21 @@ function onPointerDown(evt) {
     return;
   }
   if (currentTool === "ring") {
-    if (hitAtom && hitAtom.elem !== "C") return;
+    // 既に結合が2本以上ある原子には環を接続しない(炭素の手が4本を超えて無効な構造になるため)
+    if (hitAtom && (hitAtom.elem !== "C" || bondOrderSum(hitAtom.id) > 1)) return;
     pushHistory();
     if (!hitAtom) {
       addBenzeneRing(pos.x, pos.y, null);
     } else {
-      // クリックしたC原子をベンゼン環の1頂点として、環を接続する
-      addBenzeneRing(hitAtom.x, hitAtom.y + RING_RADIUS, hitAtom);
+      // 既存の結合があれば、その「続きの方向」に環を伸ばす(鎖に重ならないように)
+      let attachAngle = Math.PI / 2; // 孤立原子の場合は従来通り上向き
+      const neighbors = (buildAdjacency()[hitAtom.id]) || [];
+      if (neighbors.length === 1) {
+        const neighbor = findAtom(neighbors[0].to);
+        attachAngle = angleBetween(hitAtom, neighbor); // 中心から見たhitAtomの方角
+      }
+      const center = pointFromAngle(hitAtom, attachAngle + Math.PI, RING_RADIUS);
+      addBenzeneRing(center.x, center.y, hitAtom, attachAngle);
     }
     render();
     return;
@@ -321,11 +681,30 @@ function onPointerDown(evt) {
 }
 
 function onPointerMove(evt) {
-  if (!dragging) return;
-  evt.preventDefault();
-  const pos = svgCoords(evt);
-  updatePreviewLine(pos.x, pos.y);
-  highlightAtomAt(pos.x, pos.y, dragStartAtom.id);
+  if (dragging) {
+    evt.preventDefault();
+    const pos = svgCoords(evt);
+    const hover = findAtomAt(pos.x, pos.y, 16, dragStartAtom.id);
+    if (hover) {
+      updatePreviewLine(hover.x, hover.y);
+    } else {
+      const rawAngle = angleBetween(dragStartAtom, pos);
+      const snapped = snapAngleForAtom(dragStartAtom.id, rawAngle);
+      const preview = pointFromAngle(dragStartAtom, snapped, DRAW_BOND_LEN);
+      updatePreviewLine(preview.x, preview.y);
+    }
+    highlightAtomAt(pos.x, pos.y, dragStartAtom.id);
+    return;
+  }
+  if (currentTool === "ring") {
+    const pos = svgCoords(evt);
+    const hover = findAtomAt(pos.x, pos.y);
+    svg.querySelectorAll(".atom-hit").forEach(el => el.classList.remove("hover-target"));
+    if (hover && hover.elem === "C" && bondOrderSum(hover.id) <= 1) {
+      const el = svg.querySelector(`[data-atom-id="${hover.id}"]`);
+      if (el) el.classList.add("hover-target");
+    }
+  }
 }
 
 function onPointerUp(evt) {
@@ -339,7 +718,11 @@ function onPointerUp(evt) {
   if (hitAtom) {
     addBond(dragStartAtom.id, hitAtom.id, order);
   } else if (distance(dragStartAtom, pos) > MIN_DRAG_DIST) {
-    const newAtom = addAtom("C", pos.x, pos.y);
+    // ドラッグした向きを、原子の状況に応じた「きれいな角度」に自動で合わせ、結合の長さも一定にする
+    const rawAngle = angleBetween(dragStartAtom, pos);
+    const snapped = snapAngleForAtom(dragStartAtom.id, rawAngle);
+    const newPos = pointFromAngle(dragStartAtom, snapped, DRAW_BOND_LEN);
+    const newAtom = addAtom("C", newPos.x, newPos.y);
     addBond(dragStartAtom.id, newAtom.id, order);
   }
   dragStartAtom = null;
@@ -364,6 +747,7 @@ document.getElementById("reset_btn").addEventListener("click", () => {
   pushHistory();
   atoms = [];
   bonds = [];
+  ringGroups = [];
   nextAtomId = 1;
   nextBondId = 1;
   render();
